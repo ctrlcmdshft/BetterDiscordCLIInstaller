@@ -38,6 +38,21 @@ Config lives at:
 
 Command-line options override config values.
 
+Config keys:
+
+| Key | Meaning |
+| --- | --- |
+| `notify` | Show macOS notifications. |
+| `keep_open` | Patch without quitting Discord first. |
+| `reopen` | Reopen Discord after patching. |
+| `download` | Download or refresh `betterdiscord.asar`. |
+| `force_download` | Ignore the cached ETag and download again. |
+| `wait_update` | Wait for Discord's updater to finish before patching. |
+| `dry_run` | Show actions without writing files. |
+| `verbose` | Show more detailed logs. |
+| `discord_data` | Discord data folder to patch. |
+| `bd_asar` | Destination for `betterdiscord.asar`. |
+
 ## Notes
 
 The script finds Discord's current `discord_desktop_core`, writes the
