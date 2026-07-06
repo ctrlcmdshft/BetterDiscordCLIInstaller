@@ -2,7 +2,7 @@
 
 Small macOS script that patches Discord to load BetterDiscord.
 
-Supports Stable, PTB, Canary, and Development release detection.
+Supports Stable, PTB, Canary, and Development app detection.
 
 ## Install
 
@@ -55,7 +55,7 @@ Config keys:
 
 | Key | Meaning |
 | --- | --- |
-| `release` | Discord release to patch: `auto`, `all`, `stable`, `ptb`, `canary`, or `development`. |
+| `release` | Discord release to patch: `auto`, `all`, `stable`, `ptb`, `canary`, or `development`. `auto` detects installed apps. |
 | `notify` | Show macOS notifications. |
 | `keep_open` | Patch without quitting Discord first. |
 | `reopen` | Reopen Discord after patching. |

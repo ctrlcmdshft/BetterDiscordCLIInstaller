@@ -463,9 +463,9 @@ def selected_releases(args: argparse.Namespace) -> list[DiscordRelease]:
     if args.release != "auto":
         return [DISCORD_RELEASES[args.release]]
 
-    detected = [release for release in DISCORD_RELEASES.values() if release.app_path.exists() or release.data_path.exists()]
+    detected = [release for release in DISCORD_RELEASES.values() if release.app_path.exists()]
     if not detected:
-        raise FileNotFoundError("No Discord releases found. Install Discord or pass --discord-data.")
+        raise FileNotFoundError("No Discord apps found in /Applications. Install Discord or pass --discord-data.")
     return detected
 
 
@@ -488,7 +488,8 @@ def cleanup_old_versions(release: DiscordRelease, keep: int, dry_run: bool, log_
     preserved = [path for path in versions if path not in removable]
 
     LOG.info("Discord app-* versions found: %d", len(cleanup_candidates))
-    LOG.info("Keeping: %s", ", ".join(path.name for path in kept))
+    if kept:
+        LOG.info("Keeping: %s", ", ".join(path.name for path in kept))
     if not removable:
         LOG.info("No old Discord app version folders to remove.")
         return preserved
