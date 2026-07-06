@@ -1,26 +1,26 @@
-# BetterDiscordCLIInstaller
+# BetterDiscordPatcher
 
 Small macOS command-line installer for BetterDiscord.
 
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ctrlcmdshft/BetterDiscordCLIInstaller/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ctrlcmdshft/BetterDiscordPatcher/main/install.sh | sh
 ```
 
 Installs to:
 
 ```text
-~/Library/Application Support/BetterDiscordCLIInstaller
+~/Library/Application Support/BetterDiscordPatcher
 ~/.local/bin/betterdiscord
-~/.config/betterdiscord-cli-installer/config.json
+~/.config/betterdiscord-patcher/config.json
 ```
 
 The install script creates the config file if needed and asks whether to open it.
 To open config automatically during install:
 
 ```sh
-BDI_EDIT_CONFIG=1 curl -fsSL https://raw.githubusercontent.com/ctrlcmdshft/BetterDiscordCLIInstaller/main/install.sh | sh
+BDI_EDIT_CONFIG=1 curl -fsSL https://raw.githubusercontent.com/ctrlcmdshft/BetterDiscordPatcher/main/install.sh | sh
 ```
 
 If `betterdiscord` is not found after install, add this to your shell profile:
@@ -30,6 +30,8 @@ export PATH="$HOME/.local/bin:$PATH"
 ```
 
 ## Use
+
+The installed command is:
 
 ```sh
 betterdiscord
@@ -62,7 +64,7 @@ Useful options:
 Persistent settings live at:
 
 ```text
-~/.config/betterdiscord-cli-installer/config.json
+~/.config/betterdiscord-patcher/config.json
 ```
 
 Settings are applied in this order:

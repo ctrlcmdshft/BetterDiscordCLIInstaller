@@ -22,11 +22,11 @@ DISCORD_DATA = HOME / "Library/Application Support/discord"
 DISCORD_APP = Path("/Applications/Discord.app")
 BD_ASAR = HOME / "Library/Application Support/BetterDiscord/data/betterdiscord.asar"
 BD_ASAR_URL = "https://github.com/rauenzi/BetterDiscordApp/releases/latest/download/betterdiscord.asar"
-CONFIG_PATH = HOME / ".config/betterdiscord-cli-installer/config.json"
-APP_NAME = "BetterDiscordCLIInstaller"
+CONFIG_PATH = HOME / ".config/betterdiscord-patcher/config.json"
+APP_NAME = "BetterDiscordPatcher"
 INSTALL_DIR = HOME / f"Library/Application Support/{APP_NAME}"
 BIN_PATH = HOME / ".local/bin/betterdiscord"
-REPO = "ctrlcmdshft/BetterDiscordCLIInstaller"
+REPO = "ctrlcmdshft/BetterDiscordPatcher"
 BRANCH = "main"
 RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}"
 CONFIG_TEMPLATE = {
@@ -293,7 +293,7 @@ def update_script(install_dir: Path, raw_base: str) -> None:
 def download_file(url: str, destination: Path) -> None:
     temporary = destination.with_suffix(destination.suffix + ".tmp")
     LOG.info("Download %s", url)
-    request = urllib.request.Request(url, headers={"User-Agent": "BetterDiscordInstaller/2.0"})
+    request = urllib.request.Request(url, headers={"User-Agent": "BetterDiscordPatcher/2.0"})
     with urllib.request.urlopen(request, timeout=30) as response:
         temporary.write_bytes(response.read())
     temporary.replace(destination)
@@ -455,7 +455,7 @@ def patch_core(core_dir: Path, dry_run: bool) -> bool:
 
 def download_asar(path: Path, force: bool, dry_run: bool) -> bool:
     etag_path = path.with_suffix(".etag")
-    request = urllib.request.Request(BD_ASAR_URL, headers={"User-Agent": "BetterDiscordInstaller/2.0"})
+    request = urllib.request.Request(BD_ASAR_URL, headers={"User-Agent": "BetterDiscordPatcher/2.0"})
     if path.exists() and etag_path.exists() and not force:
         request.add_header("If-None-Match", etag_path.read_text(encoding="utf-8").strip())
 

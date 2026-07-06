@@ -1,12 +1,12 @@
 #!/bin/sh
 set -eu
 
-APP_NAME="BetterDiscordCLIInstaller"
+APP_NAME="BetterDiscordPatcher"
 INSTALL_DIR="${BDI_INSTALL_DIR:-"$HOME/Library/Application Support/$APP_NAME"}"
 BIN_DIR="${BDI_BIN_DIR:-"$HOME/.local/bin"}"
 BIN_PATH="${BDI_BIN_PATH:-"$BIN_DIR/betterdiscord"}"
-CONFIG_PATH="${BDI_CONFIG_PATH:-"$HOME/.config/betterdiscord-cli-installer/config.json"}"
-REPO="${BDI_REPO:-ctrlcmdshft/BetterDiscordCLIInstaller}"
+CONFIG_PATH="${BDI_CONFIG_PATH:-"$HOME/.config/betterdiscord-patcher/config.json"}"
+REPO="${BDI_REPO:-ctrlcmdshft/BetterDiscordPatcher}"
 BRANCH="${BDI_BRANCH:-main}"
 RAW_BASE="${BDI_RAW_BASE:-https://raw.githubusercontent.com/$REPO/$BRANCH}"
 
