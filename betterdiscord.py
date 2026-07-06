@@ -50,6 +50,7 @@ class DiscordRelease:
     key: str
     name: str
     app_name: str
+    bundle_id: str
     app_path: Path
     data_path: Path
     shipit_state: Path
@@ -60,6 +61,7 @@ DISCORD_RELEASES = {
         key="stable",
         name="Discord",
         app_name="Discord",
+        bundle_id="com.hnc.Discord",
         app_path=Path("/Applications/Discord.app"),
         data_path=HOME / "Library/Application Support/discord",
         shipit_state=HOME / "Library/Caches/com.hnc.Discord.ShipIt/ShipItState.plist",
@@ -68,6 +70,7 @@ DISCORD_RELEASES = {
         key="ptb",
         name="Discord PTB",
         app_name="Discord PTB",
+        bundle_id="com.hnc.DiscordPTB",
         app_path=Path("/Applications/Discord PTB.app"),
         data_path=HOME / "Library/Application Support/discordptb",
         shipit_state=HOME / "Library/Caches/com.hnc.DiscordPTB.ShipIt/ShipItState.plist",
@@ -76,6 +79,7 @@ DISCORD_RELEASES = {
         key="canary",
         name="Discord Canary",
         app_name="Discord Canary",
+        bundle_id="com.hnc.DiscordCanary",
         app_path=Path("/Applications/Discord Canary.app"),
         data_path=HOME / "Library/Application Support/discordcanary",
         shipit_state=HOME / "Library/Caches/com.hnc.DiscordCanary.ShipIt/ShipItState.plist",
@@ -84,6 +88,7 @@ DISCORD_RELEASES = {
         key="development",
         name="Discord Development",
         app_name="Discord Development",
+        bundle_id="com.hnc.DiscordDevelopment",
         app_path=Path("/Applications/Discord Development.app"),
         data_path=HOME / "Library/Application Support/discorddevelopment",
         shipit_state=HOME / "Library/Caches/com.hnc.DiscordDevelopment.ShipIt/ShipItState.plist",
@@ -468,6 +473,7 @@ def selected_releases(args: argparse.Namespace) -> list[DiscordRelease]:
                 key="custom",
                 name="Discord custom",
                 app_name=DISCORD_RELEASES["stable"].app_name,
+                bundle_id=DISCORD_RELEASES["stable"].bundle_id,
                 app_path=DISCORD_RELEASES["stable"].app_path,
                 data_path=requested_data,
                 shipit_state=DISCORD_RELEASES["stable"].shipit_state,
@@ -595,7 +601,7 @@ def install_release(release: DiscordRelease, options: Options) -> None:
         LOG.info("Discord cores patched: %d", changed)
         log_discord_app_version(release)
     finally:
-        if options.restart and options.reopen and not options.dry_run:
+        if was_running and options.restart and options.reopen and not options.dry_run:
             open_discord(release)
 
 
@@ -751,6 +757,10 @@ def wait_for_update(release: DiscordRelease, update_dir: Optional[Path], timeout
 
 
 def discord_running(release: DiscordRelease) -> bool:
+    script = f'application id "{escape_osa(release.bundle_id)}" is running'
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    if result.returncode == 0:
+        return result.stdout.strip().lower() == "true"
     return subprocess.run(["pgrep", "-x", release.app_name], capture_output=True).returncode == 0
 
 
