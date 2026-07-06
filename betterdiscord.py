@@ -101,7 +101,16 @@ def main() -> int:
         return 0
 
     if args.unpatch:
-        unpatch_discord(args.discord_data.expanduser(), dry_run=args.dry_run)
+        try:
+            unpatch_discord(
+                args.discord_data.expanduser(),
+                restart=not args.keep_open,
+                reopen=args.reopen,
+                dry_run=args.dry_run,
+            )
+        except Exception as error:
+            LOG.error("Unpatch failed: %s", error)
+            return 1
         return 0
 
     if args.uninstall:
@@ -150,7 +159,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--update", action="store_true", help="update this installer script from GitHub")
     parser.add_argument("--uninstall", action="store_true", help="remove the installer script")
     parser.add_argument("--remove-config", action="store_true", help="also remove config with --uninstall")
-    parser.add_argument("--unpatch", action="store_true", help="remove BetterDiscord from Discord")
+    parser.add_argument("--unpatch", action="store_true", help="remove the BetterDiscord loader from Discord")
     parser.add_argument(
         "--update-dir",
         type=Path,
@@ -342,19 +351,34 @@ def remove_path(path: Path, dry_run: bool) -> None:
         path.unlink()
 
 
-def unpatch_discord(discord_data: Path, dry_run: bool) -> None:
-    version_dir = latest_version_dir(discord_data)
-    core_dir = find_core_dir(version_dir)
-    index_js = core_dir / "index.js"
+def unpatch_discord(discord_data: Path, restart: bool, reopen: bool, dry_run: bool) -> None:
+    index_paths = discord_core_index_paths(discord_data)
     restored_script = 'module.exports = require("./core.asar");\n'
-    if index_js.exists():
+    patched_paths = []
+
+    for index_js in index_paths:
+        if not index_js.exists():
+            continue
         content = index_js.read_text(encoding="utf-8", errors="ignore")
-        if "betterdiscord" not in content.lower():
-            LOG.info("No BetterDiscord patch found: %s", index_js)
-            return
-    LOG.info("%sRestore: %s", "[dry-run] " if dry_run else "", index_js)
-    if not dry_run:
-        index_js.write_text(restored_script, encoding="utf-8")
+        if "betterdiscord" in content.lower():
+            patched_paths.append(index_js)
+
+    if not patched_paths:
+        LOG.info("No BetterDiscord patch found under %s", discord_data)
+        return
+
+    was_running = discord_running()
+    if was_running and restart and not dry_run:
+        quit_discord()
+
+    try:
+        for index_js in patched_paths:
+            LOG.info("%sRestore: %s", "[dry-run] " if dry_run else "", index_js)
+            if not dry_run:
+                index_js.write_text(restored_script, encoding="utf-8")
+    finally:
+        if was_running and restart and reopen and not dry_run:
+            open_discord()
 
 
 def install(options: Options) -> None:
@@ -390,7 +414,15 @@ def install(options: Options) -> None:
 
 
 def latest_version_dir(discord_data: Path) -> Path:
-    versions = sorted((p for p in discord_data.iterdir() if version_key(p)), key=version_key)
+    if not discord_data.exists():
+        raise FileNotFoundError(f"Discord data folder not found: {discord_data}")
+    try:
+        versions = sorted((p for p in discord_data.iterdir() if version_key(p)), key=version_key)
+    except PermissionError as error:
+        raise PermissionError(
+            f"Cannot read Discord data folder: {discord_data}. "
+            "Run this command from Terminal with permission to access Application Support."
+        ) from error
     if not versions:
         raise FileNotFoundError(f"No Discord version folders found in {discord_data}")
     return versions[-1]
@@ -440,6 +472,37 @@ def find_core_dir(version_dir: Path) -> Path:
         f"Searched:\n        {join_paths(candidates)}\n"
         f"Found desktop-core paths:\n        {join_paths(found[:50])}"
     )
+
+
+def discord_core_index_paths(discord_data: Path) -> list[Path]:
+    if not discord_data.exists():
+        raise FileNotFoundError(f"Discord data folder not found: {discord_data}")
+
+    try:
+        version_dirs = sorted((p for p in discord_data.iterdir() if version_key(p)), key=version_key)
+    except PermissionError as error:
+        raise PermissionError(
+            f"Cannot read Discord data folder: {discord_data}. "
+            "Run this command from Terminal with permission to access Application Support."
+        ) from error
+
+    index_paths = []
+    seen = set()
+    for version_dir in version_dirs:
+        modules = version_dir / "modules"
+        if not modules.exists():
+            continue
+        for core_asar in sorted(modules.rglob("core.asar")):
+            if "discord_desktop_core" not in str(core_asar):
+                continue
+            index_js = core_asar.parent / "index.js"
+            if index_js not in seen:
+                seen.add(index_js)
+                index_paths.append(index_js)
+
+    if not index_paths:
+        raise FileNotFoundError(f"No Discord desktop-core index.js files found under {discord_data}")
+    return index_paths
 
 
 def patch_core(core_dir: Path, dry_run: bool) -> bool:
