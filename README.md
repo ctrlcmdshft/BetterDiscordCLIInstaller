@@ -1,6 +1,6 @@
 # BetterDiscordCLIInstaller
 
-Small macOS BetterDiscord installer.
+Small macOS BetterDiscord installer script.
 
 One-line install:
 

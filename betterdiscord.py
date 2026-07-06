@@ -115,7 +115,7 @@ def parse_args() -> argparse.Namespace:
     pre_args, _ = pre_parser.parse_known_args()
 
     defaults = merged_defaults(pre_args.config.expanduser())
-    parser = argparse.ArgumentParser(description="Small macOS BetterDiscord installer.")
+    parser = argparse.ArgumentParser(description="Small macOS BetterDiscord installer script.")
     parser.set_defaults(**defaults)
 
     parser.add_argument("--config", type=Path, default=pre_args.config, help="config file path")
@@ -225,7 +225,7 @@ def options_dict(args: argparse.Namespace) -> dict:
 
 
 def install(options: Options) -> None:
-    LOG.info("BetterDiscord installer")
+    LOG.info("BetterDiscord installer script")
     LOG.info("Discord data: %s", options.discord_data)
     LOG.info("BetterDiscord asar: %s", options.bd_asar)
     notify("BetterDiscord", "Preparing installation", options.notify)
