@@ -1,6 +1,6 @@
 # BetterDiscordPatcher
 
-Small macOS command-line installer for BetterDiscord.
+Small macOS script that patches Discord to load BetterDiscord.
 
 ## Install
 
@@ -8,100 +8,38 @@ Small macOS command-line installer for BetterDiscord.
 curl -fsSL https://raw.githubusercontent.com/ctrlcmdshft/BetterDiscordPatcher/main/install.sh | sh
 ```
 
-Installs to:
-
-```text
-~/Library/Application Support/BetterDiscordPatcher
-~/.local/bin/betterdiscord
-~/.config/betterdiscord-patcher/config.json
-```
-
-The install script creates the config file if needed and asks whether to open it.
-To open config automatically during install:
-
-```sh
-BDI_EDIT_CONFIG=1 curl -fsSL https://raw.githubusercontent.com/ctrlcmdshft/BetterDiscordPatcher/main/install.sh | sh
-```
-
-If `betterdiscord` is not found after install, add this to your shell profile:
-
-```sh
-export PATH="$HOME/.local/bin:$PATH"
-```
+The installer creates a config file and asks whether to open it. If the command
+is not found after install, add `~/.local/bin` to your `PATH`.
 
 ## Use
-
-The installed command is:
 
 ```sh
 betterdiscord
 ```
 
-Common commands:
+Other useful commands:
 
 ```sh
 betterdiscord --edit-config
-betterdiscord --show-config
 betterdiscord --dry-run
 betterdiscord --update
 betterdiscord --unpatch
 betterdiscord --uninstall
-```
-
-Useful options:
-
-```text
---no-notify         Disable macOS notifications
---keep-open         Patch without quitting Discord first
---no-reopen         Quit Discord for patching but do not reopen it
---no-download       Skip downloading betterdiscord.asar
---force-download    Ignore the cached ETag and download again
---verbose           Show debug logs
+betterdiscord --help
 ```
 
 ## Config
 
-Persistent settings live at:
+Config lives at:
 
 ```text
 ~/.config/betterdiscord-patcher/config.json
 ```
 
-Settings are applied in this order:
+Command-line options override config values.
 
-```text
-defaults < config file < command-line options
-```
+## Notes
 
-Use a different config file:
-
-```sh
-betterdiscord --config ~/path/to/config.json --show-config
-```
-
-## Remove
-
-Remove BetterDiscord from Discord:
-
-```sh
-betterdiscord --unpatch
-```
-
-Remove this installer:
-
-```sh
-betterdiscord --uninstall
-```
-
-`--uninstall` asks whether to remove config if one exists. To remove the config
-without prompting:
-
-```sh
-betterdiscord --uninstall --remove-config
-```
-
-## How It Works
-
-The script finds Discord's current `discord_desktop_core` by locating
-`core.asar`, writes `index.js` beside it, and downloads
-`betterdiscord.asar` with ETag caching.
+The script finds Discord's current `discord_desktop_core`, writes the
+BetterDiscord loader to `index.js`, and downloads `betterdiscord.asar` with
+ETag caching.
