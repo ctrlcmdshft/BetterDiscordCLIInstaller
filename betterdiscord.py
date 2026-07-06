@@ -143,7 +143,7 @@ def main() -> int:
         return 0
 
     if args.show_config:
-        print(json.dumps(options_dict(args), indent=2, sort_keys=True))
+        print(json.dumps(options_dict(args), indent=2))
         return 0
 
     if args.update:
@@ -342,7 +342,7 @@ def write_config(path: Path, overwrite: bool) -> None:
         raise FileExistsError(f"Config already exists: {path}. Use --force to overwrite.")
     path.parent.mkdir(parents=True, exist_ok=True)
     data = options_dict(argparse.Namespace(**built_in_defaults()))
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     LOG.info("Wrote config: %s", path)
 
 
@@ -360,19 +360,19 @@ def edit_config(path: Path) -> None:
 
 def options_dict(args: argparse.Namespace) -> dict:
     return {
-        "bd_asar": str(args.bd_asar),
-        "cleanup_before_install": args.cleanup_before_install,
-        "discord_data": str(args.discord_data),
-        "download": args.download,
-        "dry_run": args.dry_run,
-        "force_download": args.force_download,
-        "keep_open": args.keep_open,
-        "keep_versions": args.keep_versions,
-        "notify": args.notify,
         "release": args.release,
-        "reopen": args.reopen,
-        "verbose": args.verbose,
+        "discord_data": str(args.discord_data),
+        "bd_asar": str(args.bd_asar),
+        "download": args.download,
+        "force_download": args.force_download,
         "wait_update": args.wait_update,
+        "cleanup_before_install": args.cleanup_before_install,
+        "keep_versions": args.keep_versions,
+        "keep_open": args.keep_open,
+        "reopen": args.reopen,
+        "notify": args.notify,
+        "dry_run": args.dry_run,
+        "verbose": args.verbose,
     }
 
 
