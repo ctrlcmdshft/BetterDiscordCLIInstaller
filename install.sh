@@ -72,6 +72,7 @@ if [ ! -f "$CONFIG_PATH" ]; then
     python3 "$INSTALL_DIR/betterdiscord.py" --config "$CONFIG_PATH" --init-config
 else
     say "Config exists: $CONFIG_PATH"
+    python3 "$INSTALL_DIR/betterdiscord.py" --config "$CONFIG_PATH" --format-config
 fi
 
 edit_config="${BDI_EDIT_CONFIG:-}"
