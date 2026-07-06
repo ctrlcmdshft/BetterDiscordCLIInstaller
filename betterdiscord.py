@@ -22,11 +22,12 @@ LOG = logging.getLogger("betterdiscord")
 HOME = Path.home()
 BD_ASAR_URL = "https://github.com/rauenzi/BetterDiscordApp/releases/latest/download/betterdiscord.asar"
 APP_NAME = "BetterDiscordPatcher"
-SCRIPT_VERSION = "2.1.2"
+SCRIPT_VERSION = "2.1.3"
 REPO = "ctrlcmdshft/BetterDiscordPatcher"
 BRANCH = "main"
 RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}"
 SUPPORTED_SYSTEMS = {"Darwin", "Windows"}
+SKIP_UPDATE_PROMPT_ENV = "BDP_SKIP_UPDATE_PROMPT"
 WINDOWS_RELEASE_DIRS = {
     "stable": "Discord",
     "ptb": "DiscordPTB",
@@ -201,8 +202,9 @@ def main() -> int:
         return 1
 
     if should_check_for_script_update(args):
-        if maybe_handle_script_update(args.raw_base, args.update_dir.expanduser()):
-            return 0
+        rerun_code = maybe_handle_script_update(args.raw_base, args.update_dir.expanduser())
+        if rerun_code is not None:
+            return rerun_code
 
     if args.check_update:
         return 0 if report_script_update_status(args.raw_base) else 1
@@ -377,15 +379,17 @@ def parse_args() -> argparse.Namespace:
 
 
 def should_check_for_script_update(args: argparse.Namespace) -> bool:
+    if os.environ.get(SKIP_UPDATE_PROMPT_ENV) == "1":
+        return False
     if args.update or args.init_config or args.format_config or args.edit_config or args.check_update:
         return False
     return True
 
 
-def maybe_handle_script_update(raw_base: str, install_dir: Path) -> bool:
+def maybe_handle_script_update(raw_base: str, install_dir: Path) -> Optional[int]:
     latest_version = latest_script_version(raw_base)
     if not latest_version:
-        return False
+        return None
     if version_tuple(latest_version) > version_tuple(SCRIPT_VERSION):
         LOG.info(
             "Update available: %s (installed: %s). Run `betterdiscord --update`.",
@@ -394,8 +398,16 @@ def maybe_handle_script_update(raw_base: str, install_dir: Path) -> bool:
         )
         if sys.stdin.isatty() and confirm("Update now?", default=True):
             update_script(install_dir, raw_base)
-            return True
-    return False
+            return rerun_current_command()
+    return None
+
+
+def rerun_current_command() -> int:
+    env = os.environ.copy()
+    env[SKIP_UPDATE_PROMPT_ENV] = "1"
+    command = [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]]
+    result = subprocess.run(command, env=env, check=False)
+    return result.returncode
 
 
 def report_script_update_status(raw_base: str) -> bool:

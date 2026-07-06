@@ -105,7 +105,7 @@ betterdiscord --check-update
 ```
 
 The script also warns during normal runs when a newer version is available.
-Interactive runs can offer to update immediately.
+Interactive runs can offer to update immediately and then continue the original command.
 Use `betterdiscord --update` to refresh the installed script from GitHub.
 
 | Key | Meaning |
