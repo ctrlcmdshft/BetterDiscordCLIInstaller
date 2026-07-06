@@ -79,6 +79,8 @@ CONFIG_TEMPLATE = {
     "download": True,
     "force_download": False,
     "wait_update": True,
+    "cleanup_before_install": True,
+    "keep_versions": 1,
     "dry_run": False,
     "verbose": False,
     "discord_data": DISCORD_DATA,
@@ -113,6 +115,8 @@ class Options:
     download: bool
     force_download: bool
     wait_update: bool
+    cleanup_before_install: bool
+    keep_versions: int
     dry_run: bool
 
 
@@ -131,12 +135,16 @@ def main() -> int:
         write_config(args.config, overwrite=args.force)
         return 0
 
+    if args.format_config:
+        format_config(args.config)
+        return 0
+
     if args.edit_config:
         edit_config(args.config)
         return 0
 
     if args.show_config:
-        print(json.dumps(options_dict(args), indent=2, sort_keys=True))
+        print(json.dumps(options_dict(args), indent=2))
         return 0
 
     if args.update:
@@ -144,7 +152,24 @@ def main() -> int:
         return 0
 
     if args.unpatch:
-        unpatch_discord(args.discord_data.expanduser(), dry_run=args.dry_run)
+        try:
+            unpatch_discord(
+                args.discord_data.expanduser(),
+                restart=not args.keep_open,
+                reopen=args.reopen,
+                dry_run=args.dry_run,
+            )
+        except Exception as error:
+            LOG.error("Unpatch failed: %s", error)
+            return 1
+        return 0
+
+    if args.cleanup_old:
+        try:
+            cleanup_old_versions(args.discord_data.expanduser(), keep=args.keep_versions, dry_run=args.dry_run)
+        except Exception as error:
+            LOG.error("Cleanup failed: %s", error)
+            return 1
         return 0
 
     if args.uninstall:
@@ -166,6 +191,8 @@ def main() -> int:
         download=args.download,
         force_download=args.force_download,
         wait_update=args.wait_update,
+        cleanup_before_install=args.cleanup_before_install,
+        keep_versions=args.keep_versions,
         dry_run=args.dry_run,
     )
 
@@ -188,12 +215,14 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--config", type=Path, default=pre_args.config, help="config file path")
     parser.add_argument("--init-config", action="store_true", help="create a config file with current defaults")
+    parser.add_argument("--format-config", action="store_true", help="rewrite the config file in the standard order")
     parser.add_argument("--edit-config", action="store_true", help="open the config file for editing")
-    parser.add_argument("--show-config", action="store_true", help="print effective settings and exit")
+    parser.add_argument("--show-config", action="store_true", help="print config values and exit")
     parser.add_argument("--update", action="store_true", help="update this installer script from GitHub")
     parser.add_argument("--uninstall", action="store_true", help="remove the installer script")
     parser.add_argument("--remove-config", action="store_true", help="also remove config with --uninstall")
-    parser.add_argument("--unpatch", action="store_true", help="remove BetterDiscord from Discord")
+    parser.add_argument("--unpatch", action="store_true", help="remove the BetterDiscord loader from Discord")
+    parser.add_argument("--cleanup-old", action="store_true", help="remove old Discord app version folders")
     parser.add_argument(
         "--update-dir",
         type=Path,
@@ -236,9 +265,14 @@ def parse_args() -> argparse.Namespace:
     wait_update.add_argument("--wait-update", dest="wait_update", action="store_true", help="wait for Discord ShipIt updates")
     wait_update.add_argument("--skip-update-wait", dest="wait_update", action="store_false", help="do not wait for Discord ShipIt updates")
 
+    cleanup_install = parser.add_mutually_exclusive_group()
+    cleanup_install.add_argument("--cleanup-before-install", dest="cleanup_before_install", action="store_true", help="remove old Discord app version folders before patching")
+    cleanup_install.add_argument("--no-cleanup-before-install", dest="cleanup_before_install", action="store_false", help="keep old Discord app version folders before patching")
+
     parser.add_argument("--force-download", action="store_true", default=defaults["force_download"], help="download betterdiscord.asar even if cached")
     parser.add_argument("--dry-run", action="store_true", default=defaults["dry_run"], help="show what would change without writing files")
     parser.add_argument("--verbose", "-v", action="store_true", default=defaults["verbose"], help="show debug logs")
+    parser.add_argument("--keep-versions", type=int, default=defaults["keep_versions"], help="number of Discord app versions to keep when cleaning old versions")
     parser.add_argument("--discord-data", type=Path, default=defaults["discord_data"], help="Discord data folder")
     parser.add_argument("--bd-asar", type=Path, default=defaults["bd_asar"], help="BetterDiscord asar output path")
     return parser.parse_args()
@@ -265,7 +299,17 @@ def read_config(path: Path) -> dict:
         raise ValueError(f"Config must be a JSON object: {path}")
 
     result = {}
-    bool_keys = {"notify", "keep_open", "reopen", "download", "force_download", "wait_update", "dry_run", "verbose"}
+    bool_keys = {
+        "notify",
+        "keep_open",
+        "reopen",
+        "download",
+        "force_download",
+        "wait_update",
+        "cleanup_before_install",
+        "dry_run",
+        "verbose",
+    }
     path_keys = {"discord_data", "bd_asar"}
     for key, value in data.items():
         if key in bool_keys:
@@ -276,6 +320,13 @@ def read_config(path: Path) -> dict:
             if not isinstance(value, str):
                 raise ValueError(f"Config value must be a path string: {key}")
             result[key] = Path(value).expanduser()
+        elif key == "keep_versions":
+            if not isinstance(value, int) or value < 1:
+                raise ValueError("Config keep_versions must be an integer of 1 or greater.")
+            result[key] = value
+        elif key == "release":
+            if not isinstance(value, str):
+                raise ValueError("Config release must be a string.")
         else:
             raise ValueError(f"Unknown config key: {key}")
     return result
@@ -287,14 +338,25 @@ def write_config(path: Path, overwrite: bool) -> None:
         raise FileExistsError(f"Config already exists: {path}. Use --force to overwrite.")
     path.parent.mkdir(parents=True, exist_ok=True)
     data = options_dict(argparse.Namespace(**built_in_defaults()))
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     LOG.info("Wrote config: %s", path)
+
+
+def format_config(path: Path) -> None:
+    path = path.expanduser()
+    defaults = merged_defaults(path)
+    data = options_dict(argparse.Namespace(**defaults))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    LOG.info("Formatted config: %s", path)
 
 
 def edit_config(path: Path) -> None:
     path = path.expanduser()
     if not path.exists():
         write_config(path, overwrite=False)
+    else:
+        format_config(path)
 
     editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
     if editor:
@@ -308,16 +370,15 @@ def edit_config(path: Path) -> None:
 
 def options_dict(args: argparse.Namespace) -> dict:
     return {
-        "bd_asar": str(args.bd_asar),
         "discord_data": str(args.discord_data),
+        "bd_asar": str(args.bd_asar),
         "download": args.download,
-        "dry_run": args.dry_run,
-        "force_download": args.force_download,
-        "keep_open": args.keep_open,
-        "notify": args.notify,
-        "reopen": args.reopen,
-        "verbose": args.verbose,
         "wait_update": args.wait_update,
+        "cleanup_before_install": args.cleanup_before_install,
+        "keep_versions": args.keep_versions,
+        "keep_open": args.keep_open,
+        "reopen": args.reopen,
+        "notify": args.notify,
     }
 
 
@@ -393,19 +454,56 @@ def remove_path(path: Path, dry_run: bool) -> None:
         path.unlink()
 
 
-def unpatch_discord(discord_data: Path, dry_run: bool) -> None:
-    version_dir = latest_version_dir(discord_data)
-    core_dir = find_core_dir(version_dir)
-    index_js = core_dir / "index.js"
+def cleanup_old_versions(discord_data: Path, keep: int, dry_run: bool) -> list[Path]:
+    if keep < 1:
+        raise ValueError("--keep-versions must be 1 or greater")
+
+    versions = discord_version_dirs(discord_data)
+    cleanup_candidates = [path for path in versions if path.name.startswith("app-")]
+    kept = cleanup_candidates[-keep:]
+    removable = [path for path in cleanup_candidates if path not in kept]
+    preserved = [path for path in versions if path not in removable]
+
+    LOG.info("Discord app-* versions found: %d", len(cleanup_candidates))
+    if kept:
+        LOG.info("Keeping: %s", ", ".join(path.name for path in kept))
+    if not removable:
+        LOG.info("No old Discord app version folders to remove.")
+        return preserved
+
+    for version_dir in removable:
+        remove_path(version_dir, dry_run)
+    return preserved
+
+
+def unpatch_discord(discord_data: Path, restart: bool, reopen: bool, dry_run: bool) -> None:
+    index_paths = discord_core_index_paths(discord_data)
     restored_script = 'module.exports = require("./core.asar");\n'
-    if index_js.exists():
+    patched_paths = []
+
+    for index_js in index_paths:
+        if not index_js.exists():
+            continue
         content = index_js.read_text(encoding="utf-8", errors="ignore")
-        if "betterdiscord" not in content.lower():
-            LOG.info("No BetterDiscord patch found: %s", index_js)
-            return
-    LOG.info("%sRestore: %s", "[dry-run] " if dry_run else "", index_js)
-    if not dry_run:
-        index_js.write_text(restored_script, encoding="utf-8")
+        if "betterdiscord" in content.lower():
+            patched_paths.append(index_js)
+
+    if not patched_paths:
+        LOG.info("No BetterDiscord patch found under %s", discord_data)
+        return
+
+    was_running = restart and discord_running()
+    if was_running and restart and not dry_run:
+        quit_discord()
+
+    try:
+        for index_js in patched_paths:
+            LOG.info("%sRestore: %s", "[dry-run] " if dry_run else "", index_js)
+            if not dry_run:
+                index_js.write_text(restored_script, encoding="utf-8")
+    finally:
+        if was_running and restart and reopen and not dry_run:
+            open_discord()
 
 
 def install(options: Options) -> None:
@@ -419,10 +517,18 @@ def install(options: Options) -> None:
         notify("BetterDiscord", "Discord is still updating", options.notify)
         raise RuntimeError("Discord update did not finish in time")
 
-    version_dir = latest_version_dir(options.discord_data)
-    core_dir = find_core_dir(version_dir)
-    LOG.info("Discord version: %s", version_dir.name)
-    LOG.info("Discord core: %s", core_dir)
+    version_dirs = None
+    if options.cleanup_before_install:
+        version_dirs = cleanup_old_versions(
+            options.discord_data,
+            keep=options.keep_versions,
+            dry_run=options.dry_run,
+        )
+
+    version_dir = latest_version_dir(options.discord_data, version_dirs=version_dirs)
+    core_dirs = discord_core_dirs(options.discord_data, version_dirs=version_dirs)
+    LOG.info("Latest Discord version: %s", version_dir.name)
+    LOG.info("Discord cores found: %d", len(core_dirs))
 
     was_running = discord_running()
     if was_running and options.restart and not options.dry_run:
@@ -431,7 +537,11 @@ def install(options: Options) -> None:
     try:
         if options.download:
             download_asar(options.bd_asar, force=options.force_download, dry_run=options.dry_run)
-        patch_core(core_dir, dry_run=options.dry_run)
+        changed = 0
+        for core_dir in core_dirs:
+            if patch_core(core_dir, dry_run=options.dry_run):
+                changed += 1
+        LOG.info("Discord cores patched: %d", changed)
         log_discord_app_version()
     finally:
         if was_running and options.restart and options.reopen and not options.dry_run:
@@ -440,11 +550,20 @@ def install(options: Options) -> None:
     notify("BetterDiscord", "Installation complete", options.notify)
 
 
-def latest_version_dir(discord_data: Path) -> Path:
-    versions = sorted((p for p in discord_data.iterdir() if version_key(p)), key=version_key)
+def latest_version_dir(discord_data: Path, version_dirs: Optional[list[Path]] = None) -> Path:
+    return (version_dirs or discord_version_dirs(discord_data))[-1]
+
+
+def discord_version_dirs(discord_data: Path) -> list[Path]:
+    if not discord_data.exists():
+        raise FileNotFoundError(f"Discord data folder not found: {discord_data}")
+    try:
+        versions = sorted((p for p in discord_data.iterdir() if version_key(p)), key=version_key)
+    except PermissionError as error:
+        raise PermissionError(f"Cannot read Discord data folder: {discord_data}") from error
     if not versions:
         raise FileNotFoundError(f"No Discord version folders found in {discord_data}")
-    return versions[-1]
+    return versions
 
 
 def version_key(path: Path) -> tuple[int, ...]:
@@ -491,6 +610,31 @@ def find_core_dir(version_dir: Path) -> Path:
         f"Searched:\n        {join_paths(candidates)}\n"
         f"Found desktop-core paths:\n        {join_paths(found[:50])}"
     )
+
+
+def discord_core_dirs(discord_data: Path, version_dirs: Optional[list[Path]] = None) -> list[Path]:
+    version_dirs = version_dirs or discord_version_dirs(discord_data)
+    core_dirs = []
+    seen = set()
+    for version_dir in version_dirs:
+        modules = version_dir / "modules"
+        if not modules.exists():
+            continue
+        for core_asar in sorted(modules.rglob("core.asar")):
+            if "discord_desktop_core" not in str(core_asar):
+                continue
+            core_dir = core_asar.parent
+            if core_dir not in seen:
+                seen.add(core_dir)
+                core_dirs.append(core_dir)
+
+    if not core_dirs:
+        raise FileNotFoundError(f"No Discord desktop-core folders found under {discord_data}")
+    return core_dirs
+
+
+def discord_core_index_paths(discord_data: Path) -> list[Path]:
+    return [core_dir / "index.js" for core_dir in discord_core_dirs(discord_data)]
 
 
 def patch_core(core_dir: Path, dry_run: bool) -> bool:

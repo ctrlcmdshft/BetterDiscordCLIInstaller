@@ -33,6 +33,7 @@ if (!(Test-Path $ConfigPath)) {
 }
 else {
     Write-Host "Config exists: $ConfigPath"
+    python (Join-Path $InstallDir "betterdiscord.py") --config $ConfigPath --format-config
 }
 
 if ($env:BDI_EDIT_CONFIG -eq "1") {

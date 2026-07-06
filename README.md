@@ -1,9 +1,14 @@
 # BetterDiscordPatcher
 
-Small script that patches Discord to load BetterDiscord.
+![macOS](https://img.shields.io/badge/macOS-supported-0A84FF)
+![Windows](https://img.shields.io/badge/Windows-preview-FF9F0A)
+![Python](https://img.shields.io/badge/python-3.x-34C759)
 
-This branch contains early Windows support groundwork. macOS remains the stable
-path until Windows install and patch flows are tested on a Windows machine.
+Small patcher that installs the BetterDiscord loader into Discord's desktop
+core.
+
+This branch contains Windows support groundwork. macOS is the stable path;
+Windows install and patch flows still need testing on a Windows machine.
 
 ## Install
 
@@ -13,60 +18,86 @@ macOS:
 curl -fsSL https://raw.githubusercontent.com/ctrlcmdshft/BetterDiscordPatcher/main/install.sh | sh
 ```
 
-Windows branch preview:
+Windows preview:
 
 ```powershell
 irm https://raw.githubusercontent.com/ctrlcmdshft/BetterDiscordPatcher/windows/install.ps1 | iex
 ```
 
-The installer creates a config file and asks whether to open it. If the command
-is not found after install, add `~/.local/bin` to your `PATH`.
-
-## Use
+## Commands
 
 ```sh
 betterdiscord
-```
-
-Other useful commands:
-
-```sh
-betterdiscord --edit-config
 betterdiscord --dry-run
-betterdiscord --update
+betterdiscord --edit-config
+betterdiscord --format-config
+betterdiscord --cleanup-old --dry-run
 betterdiscord --unpatch
+betterdiscord --update
 betterdiscord --uninstall
-betterdiscord --help
 ```
 
 ## Config
 
-Config lives at:
+Config paths:
 
 ```text
 ~/.config/betterdiscord-patcher/config.json
 %APPDATA%\BetterDiscordPatcher\config.json
 ```
 
-Command-line options override config values.
+Command-line options override config values. Reformat an existing config with:
 
-Config keys:
+```sh
+betterdiscord --format-config
+```
+
+Generated config:
+
+```json
+{
+  "discord_data": "~/Library/Application Support/discord",
+  "bd_asar": "~/Library/Application Support/BetterDiscord/data/betterdiscord.asar",
+  "download": true,
+  "wait_update": true,
+  "cleanup_before_install": true,
+  "keep_versions": 1,
+  "keep_open": false,
+  "reopen": true,
+  "notify": false
+}
+```
+
+The example above shows macOS paths. Windows uses `%LOCALAPPDATA%` for Discord
+data and `%APPDATA%` for BetterDiscord/config paths.
 
 | Key | Meaning |
 | --- | --- |
-| `notify` | Show macOS notifications. |
-| `keep_open` | Patch without quitting Discord first. |
-| `reopen` | Reopen Discord after patching. |
-| `download` | Download or refresh `betterdiscord.asar`. |
-| `force_download` | Ignore the cached ETag and download again. |
-| `wait_update` | Wait for Discord's updater to finish before patching. |
-| `dry_run` | Show actions without writing files. |
-| `verbose` | Show more detailed logs. |
 | `discord_data` | Discord data folder to patch. |
 | `bd_asar` | Destination for `betterdiscord.asar`. |
+| `download` | Download or refresh `betterdiscord.asar`. |
+| `wait_update` | Wait for Discord's updater to finish before patching. |
+| `cleanup_before_install` | Remove old Discord `app-*` folders before patching. |
+| `keep_versions` | Number of Discord `app-*` versions to keep when cleaning. |
+| `keep_open` | Patch without quitting Discord first. |
+| `reopen` | Reopen Discord only if it was running before patching. |
+| `notify` | Show macOS notifications. |
 
-## Notes
+## Cleanup
 
-The script finds Discord's current `discord_desktop_core`, writes the
-BetterDiscord loader to `index.js`, and downloads `betterdiscord.asar` with
-ETag caching.
+Cleanup only removes old `app-*` folders and keeps the newest app version folder.
+
+```sh
+betterdiscord --cleanup-old --dry-run
+betterdiscord --cleanup-old
+```
+
+## Uninstall
+
+```sh
+betterdiscord --unpatch
+betterdiscord --uninstall
+```
+
+`--unpatch` removes the BetterDiscord loader from Discord. `--uninstall` removes
+the script command and asks before removing config.
