@@ -22,15 +22,18 @@ DISCORD_APP = Path("/Applications/Discord.app")
 BD_ASAR = HOME / "Library/Application Support/BetterDiscord/data/betterdiscord.asar"
 BD_ASAR_URL = "https://github.com/rauenzi/BetterDiscordApp/releases/latest/download/betterdiscord.asar"
 CONFIG_PATH = HOME / ".config/betterdiscord-cli-installer/config.json"
-
-DEFAULT_NOTIFY = False
-DEFAULT_KEEP_OPEN = False
-DEFAULT_REOPEN = True
-DEFAULT_DOWNLOAD = True
-DEFAULT_FORCE_DOWNLOAD = False
-DEFAULT_WAIT_UPDATE = True
-DEFAULT_DRY_RUN = False
-DEFAULT_VERBOSE = False
+CONFIG_TEMPLATE = {
+    "notify": False,
+    "keep_open": False,
+    "reopen": True,
+    "download": True,
+    "force_download": False,
+    "wait_update": True,
+    "dry_run": False,
+    "verbose": False,
+    "discord_data": DISCORD_DATA,
+    "bd_asar": BD_ASAR,
+}
 
 INJECTION = """\
 // BetterDiscord's Injection Script
@@ -150,18 +153,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def built_in_defaults() -> dict:
-    return {
-        "notify": DEFAULT_NOTIFY,
-        "keep_open": DEFAULT_KEEP_OPEN,
-        "reopen": DEFAULT_REOPEN,
-        "download": DEFAULT_DOWNLOAD,
-        "force_download": DEFAULT_FORCE_DOWNLOAD,
-        "wait_update": DEFAULT_WAIT_UPDATE,
-        "dry_run": DEFAULT_DRY_RUN,
-        "verbose": DEFAULT_VERBOSE,
-        "discord_data": DISCORD_DATA,
-        "bd_asar": BD_ASAR,
-    }
+    return CONFIG_TEMPLATE.copy()
 
 
 def merged_defaults(config_path: Path) -> dict:
