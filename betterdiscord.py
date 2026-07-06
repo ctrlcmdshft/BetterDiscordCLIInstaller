@@ -367,7 +367,7 @@ def unpatch_discord(discord_data: Path, restart: bool, reopen: bool, dry_run: bo
         LOG.info("No BetterDiscord patch found under %s", discord_data)
         return
 
-    was_running = discord_running()
+    was_running = restart and discord_running()
     if was_running and restart and not dry_run:
         quit_discord()
 
@@ -393,18 +393,22 @@ def install(options: Options) -> None:
         raise RuntimeError("Discord update did not finish in time")
 
     version_dir = latest_version_dir(options.discord_data)
-    core_dir = find_core_dir(version_dir)
-    LOG.info("Discord version: %s", version_dir.name)
-    LOG.info("Discord core: %s", core_dir)
+    core_dirs = discord_core_dirs(options.discord_data)
+    LOG.info("Latest Discord version: %s", version_dir.name)
+    LOG.info("Discord cores found: %d", len(core_dirs))
 
-    was_running = discord_running()
+    was_running = options.restart and discord_running()
     if was_running and options.restart and not options.dry_run:
         quit_discord()
 
     try:
         if options.download:
             download_asar(options.bd_asar, force=options.force_download, dry_run=options.dry_run)
-        patch_core(core_dir, dry_run=options.dry_run)
+        changed = 0
+        for core_dir in core_dirs:
+            if patch_core(core_dir, dry_run=options.dry_run):
+                changed += 1
+        LOG.info("Discord cores patched: %d", changed)
         log_discord_app_version()
     finally:
         if was_running and options.restart and options.reopen and not options.dry_run:
@@ -474,7 +478,7 @@ def find_core_dir(version_dir: Path) -> Path:
     )
 
 
-def discord_core_index_paths(discord_data: Path) -> list[Path]:
+def discord_core_dirs(discord_data: Path) -> list[Path]:
     if not discord_data.exists():
         raise FileNotFoundError(f"Discord data folder not found: {discord_data}")
 
@@ -486,7 +490,7 @@ def discord_core_index_paths(discord_data: Path) -> list[Path]:
             "Run this command from Terminal with permission to access Application Support."
         ) from error
 
-    index_paths = []
+    core_dirs = []
     seen = set()
     for version_dir in version_dirs:
         modules = version_dir / "modules"
@@ -495,14 +499,18 @@ def discord_core_index_paths(discord_data: Path) -> list[Path]:
         for core_asar in sorted(modules.rglob("core.asar")):
             if "discord_desktop_core" not in str(core_asar):
                 continue
-            index_js = core_asar.parent / "index.js"
-            if index_js not in seen:
-                seen.add(index_js)
-                index_paths.append(index_js)
+            core_dir = core_asar.parent
+            if core_dir not in seen:
+                seen.add(core_dir)
+                core_dirs.append(core_dir)
 
-    if not index_paths:
-        raise FileNotFoundError(f"No Discord desktop-core index.js files found under {discord_data}")
-    return index_paths
+    if not core_dirs:
+        raise FileNotFoundError(f"No Discord desktop-core folders found under {discord_data}")
+    return core_dirs
+
+
+def discord_core_index_paths(discord_data: Path) -> list[Path]:
+    return [core_dir / "index.js" for core_dir in discord_core_dirs(discord_data)]
 
 
 def patch_core(core_dir: Path, dry_run: bool) -> bool:
