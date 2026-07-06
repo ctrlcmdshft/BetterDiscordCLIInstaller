@@ -36,6 +36,8 @@ CONFIG_TEMPLATE = {
     "download": True,
     "force_download": False,
     "wait_update": True,
+    "cleanup_before_install": True,
+    "keep_versions": 1,
     "dry_run": False,
     "verbose": False,
     "discord_data": DISCORD_DATA,
@@ -116,6 +118,8 @@ class Options:
     download: bool
     force_download: bool
     wait_update: bool
+    cleanup_before_install: bool
+    keep_versions: int
     dry_run: bool
 
 
@@ -155,6 +159,15 @@ def main() -> int:
             return 1
         return 0
 
+    if args.cleanup_old:
+        try:
+            for release in selected_releases(args):
+                cleanup_old_versions(release, keep=args.keep_versions, dry_run=args.dry_run)
+        except Exception as error:
+            LOG.error("Cleanup failed: %s", error)
+            return 1
+        return 0
+
     if args.uninstall:
         uninstall_script(
             args.update_dir.expanduser(),
@@ -174,6 +187,8 @@ def main() -> int:
         download=args.download,
         force_download=args.force_download,
         wait_update=args.wait_update,
+        cleanup_before_install=args.cleanup_before_install,
+        keep_versions=args.keep_versions,
         dry_run=args.dry_run,
     )
 
@@ -202,6 +217,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--uninstall", action="store_true", help="remove the installer script")
     parser.add_argument("--remove-config", action="store_true", help="also remove config with --uninstall")
     parser.add_argument("--unpatch", action="store_true", help="remove the BetterDiscord loader from Discord")
+    parser.add_argument("--cleanup-old", action="store_true", help="remove old Discord app version folders")
     parser.add_argument(
         "--update-dir",
         type=Path,
@@ -244,9 +260,14 @@ def parse_args() -> argparse.Namespace:
     wait_update.add_argument("--wait-update", dest="wait_update", action="store_true", help="wait for Discord ShipIt updates")
     wait_update.add_argument("--skip-update-wait", dest="wait_update", action="store_false", help="do not wait for Discord ShipIt updates")
 
+    cleanup_install = parser.add_mutually_exclusive_group()
+    cleanup_install.add_argument("--cleanup-before-install", dest="cleanup_before_install", action="store_true", help="remove old Discord app version folders before patching")
+    cleanup_install.add_argument("--no-cleanup-before-install", dest="cleanup_before_install", action="store_false", help="keep old Discord app version folders before patching")
+
     parser.add_argument("--force-download", action="store_true", default=defaults["force_download"], help="download betterdiscord.asar even if cached")
     parser.add_argument("--dry-run", action="store_true", default=defaults["dry_run"], help="show what would change without writing files")
     parser.add_argument("--verbose", "-v", action="store_true", default=defaults["verbose"], help="show debug logs")
+    parser.add_argument("--keep-versions", type=int, default=defaults["keep_versions"], help="number of Discord app versions to keep when cleaning old versions")
     parser.add_argument(
         "--release",
         choices=["auto", "all", *DISCORD_RELEASES.keys()],
@@ -279,7 +300,17 @@ def read_config(path: Path) -> dict:
         raise ValueError(f"Config must be a JSON object: {path}")
 
     result = {}
-    bool_keys = {"notify", "keep_open", "reopen", "download", "force_download", "wait_update", "dry_run", "verbose"}
+    bool_keys = {
+        "notify",
+        "keep_open",
+        "reopen",
+        "download",
+        "force_download",
+        "wait_update",
+        "cleanup_before_install",
+        "dry_run",
+        "verbose",
+    }
     path_keys = {"discord_data", "bd_asar"}
     for key, value in data.items():
         if key in bool_keys:
@@ -295,6 +326,10 @@ def read_config(path: Path) -> dict:
                 raise ValueError("Config release must be a string.")
             if value not in {"auto", "all", *DISCORD_RELEASES.keys()}:
                 raise ValueError(f"Config release must be auto, all, stable, ptb, canary, or development: {value}")
+            result[key] = value
+        elif key == "keep_versions":
+            if not isinstance(value, int) or value < 1:
+                raise ValueError("Config keep_versions must be an integer of 1 or greater.")
             result[key] = value
         else:
             raise ValueError(f"Unknown config key: {key}")
@@ -326,11 +361,13 @@ def edit_config(path: Path) -> None:
 def options_dict(args: argparse.Namespace) -> dict:
     return {
         "bd_asar": str(args.bd_asar),
+        "cleanup_before_install": args.cleanup_before_install,
         "discord_data": str(args.discord_data),
         "download": args.download,
         "dry_run": args.dry_run,
         "force_download": args.force_download,
         "keep_open": args.keep_open,
+        "keep_versions": args.keep_versions,
         "notify": args.notify,
         "release": args.release,
         "reopen": args.reopen,
@@ -432,6 +469,27 @@ def selected_releases(args: argparse.Namespace) -> list[DiscordRelease]:
     return detected
 
 
+def cleanup_old_versions(release: DiscordRelease, keep: int, dry_run: bool, log_release: bool = True) -> None:
+    if keep < 1:
+        raise ValueError("--keep-versions must be 1 or greater")
+    if log_release:
+        LOG.info("Release: %s", release.name)
+        LOG.info("Discord data: %s", release.data_path)
+
+    versions = discord_version_dirs(release.data_path)
+    kept = versions[-keep:]
+    removable = versions[:-keep]
+
+    LOG.info("Discord app versions found: %d", len(versions))
+    LOG.info("Keeping: %s", ", ".join(path.name for path in kept))
+    if not removable:
+        LOG.info("No old Discord app version folders to remove.")
+        return
+
+    for version_dir in removable:
+        remove_path(version_dir, dry_run)
+
+
 def unpatch_discord(release: DiscordRelease, restart: bool, reopen: bool, dry_run: bool) -> None:
     LOG.info("Release: %s", release.name)
     index_paths = discord_core_index_paths(release.data_path)
@@ -486,6 +544,9 @@ def install_release(release: DiscordRelease, options: Options) -> None:
         notify("BetterDiscord", f"{release.name} is still updating", options.notify)
         raise RuntimeError(f"{release.name} update did not finish in time")
 
+    if options.cleanup_before_install:
+        cleanup_old_versions(release, keep=options.keep_versions, dry_run=options.dry_run, log_release=False)
+
     version_dir = latest_version_dir(release.data_path)
     core_dirs = discord_core_dirs(release.data_path)
     LOG.info("Latest Discord version: %s", version_dir.name)
@@ -508,6 +569,10 @@ def install_release(release: DiscordRelease, options: Options) -> None:
 
 
 def latest_version_dir(discord_data: Path) -> Path:
+    return discord_version_dirs(discord_data)[-1]
+
+
+def discord_version_dirs(discord_data: Path) -> list[Path]:
     if not discord_data.exists():
         raise FileNotFoundError(f"Discord data folder not found: {discord_data}")
     try:
@@ -519,7 +584,7 @@ def latest_version_dir(discord_data: Path) -> Path:
         ) from error
     if not versions:
         raise FileNotFoundError(f"No Discord version folders found in {discord_data}")
-    return versions[-1]
+    return versions
 
 
 def version_key(path: Path) -> tuple[int, ...]:

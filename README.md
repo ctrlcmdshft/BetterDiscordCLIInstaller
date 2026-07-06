@@ -27,8 +27,17 @@ betterdiscord --dry-run
 betterdiscord --release canary
 betterdiscord --update
 betterdiscord --unpatch
+betterdiscord --cleanup-old --dry-run
+betterdiscord --no-cleanup-before-install
 betterdiscord --uninstall
 betterdiscord --help
+```
+
+Remove old Discord `app-*` folders after previewing:
+
+```sh
+betterdiscord --cleanup-old --dry-run
+betterdiscord --cleanup-old
 ```
 
 ## Config
@@ -52,6 +61,8 @@ Config keys:
 | `download` | Download or refresh `betterdiscord.asar`. |
 | `force_download` | Ignore the cached ETag and download again. |
 | `wait_update` | Wait for Discord's updater to finish before patching. |
+| `cleanup_before_install` | Remove old Discord `app-*` folders before patching. |
+| `keep_versions` | Number of Discord `app-*` versions to keep when cleaning. |
 | `dry_run` | Show actions without writing files. |
 | `verbose` | Show more detailed logs. |
 | `discord_data` | Discord data folder to patch. |
@@ -59,6 +70,6 @@ Config keys:
 
 ## Notes
 
-The script finds Discord's current `discord_desktop_core` folders, writes the
-BetterDiscord loader to `index.js`, and downloads `betterdiscord.asar` with
-ETag caching.
+The script can remove old Discord `app-*` folders, finds Discord's current
+`discord_desktop_core` folders, writes the BetterDiscord loader to `index.js`,
+and downloads `betterdiscord.asar` with ETag caching.
