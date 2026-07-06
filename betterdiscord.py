@@ -19,7 +19,6 @@ LOG = logging.getLogger("betterdiscord")
 
 HOME = Path.home()
 DISCORD_DATA = HOME / "Library/Application Support/discord"
-DISCORD_APP = Path("/Applications/Discord.app")
 BD_ASAR = HOME / "Library/Application Support/BetterDiscord/data/betterdiscord.asar"
 BD_ASAR_URL = "https://github.com/rauenzi/BetterDiscordApp/releases/latest/download/betterdiscord.asar"
 CONFIG_PATH = HOME / ".config/betterdiscord-patcher/config.json"
@@ -30,6 +29,7 @@ REPO = "ctrlcmdshft/BetterDiscordPatcher"
 BRANCH = "main"
 RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}"
 CONFIG_TEMPLATE = {
+    "release": "auto",
     "notify": False,
     "keep_open": False,
     "reopen": True,
@@ -40,6 +40,52 @@ CONFIG_TEMPLATE = {
     "verbose": False,
     "discord_data": DISCORD_DATA,
     "bd_asar": BD_ASAR,
+}
+
+
+@dataclass(frozen=True)
+class DiscordRelease:
+    key: str
+    name: str
+    app_name: str
+    app_path: Path
+    data_path: Path
+    shipit_state: Path
+
+
+DISCORD_RELEASES = {
+    "stable": DiscordRelease(
+        key="stable",
+        name="Discord",
+        app_name="Discord",
+        app_path=Path("/Applications/Discord.app"),
+        data_path=HOME / "Library/Application Support/discord",
+        shipit_state=HOME / "Library/Caches/com.hnc.Discord.ShipIt/ShipItState.plist",
+    ),
+    "ptb": DiscordRelease(
+        key="ptb",
+        name="Discord PTB",
+        app_name="Discord PTB",
+        app_path=Path("/Applications/Discord PTB.app"),
+        data_path=HOME / "Library/Application Support/discordptb",
+        shipit_state=HOME / "Library/Caches/com.hnc.DiscordPTB.ShipIt/ShipItState.plist",
+    ),
+    "canary": DiscordRelease(
+        key="canary",
+        name="Discord Canary",
+        app_name="Discord Canary",
+        app_path=Path("/Applications/Discord Canary.app"),
+        data_path=HOME / "Library/Application Support/discordcanary",
+        shipit_state=HOME / "Library/Caches/com.hnc.DiscordCanary.ShipIt/ShipItState.plist",
+    ),
+    "development": DiscordRelease(
+        key="development",
+        name="Discord Development",
+        app_name="Discord Development",
+        app_path=Path("/Applications/Discord Development.app"),
+        data_path=HOME / "Library/Application Support/discorddevelopment",
+        shipit_state=HOME / "Library/Caches/com.hnc.DiscordDevelopment.ShipIt/ShipItState.plist",
+    ),
 }
 
 INJECTION = """\
@@ -62,7 +108,7 @@ module.exports = require("./core.asar");
 
 @dataclass
 class Options:
-    discord_data: Path
+    releases: list[DiscordRelease]
     bd_asar: Path
     notify: bool
     restart: bool
@@ -102,12 +148,8 @@ def main() -> int:
 
     if args.unpatch:
         try:
-            unpatch_discord(
-                args.discord_data.expanduser(),
-                restart=not args.keep_open,
-                reopen=args.reopen,
-                dry_run=args.dry_run,
-            )
+            for release in selected_releases(args):
+                unpatch_discord(release, restart=not args.keep_open, reopen=args.reopen, dry_run=args.dry_run)
         except Exception as error:
             LOG.error("Unpatch failed: %s", error)
             return 1
@@ -124,7 +166,7 @@ def main() -> int:
         return 0
 
     options = Options(
-        discord_data=args.discord_data.expanduser(),
+        releases=selected_releases(args),
         bd_asar=args.bd_asar.expanduser(),
         notify=args.notify,
         restart=not args.keep_open,
@@ -205,6 +247,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--force-download", action="store_true", default=defaults["force_download"], help="download betterdiscord.asar even if cached")
     parser.add_argument("--dry-run", action="store_true", default=defaults["dry_run"], help="show what would change without writing files")
     parser.add_argument("--verbose", "-v", action="store_true", default=defaults["verbose"], help="show debug logs")
+    parser.add_argument(
+        "--release",
+        choices=["auto", "all", *DISCORD_RELEASES.keys()],
+        default=defaults["release"],
+        help="Discord release to patch",
+    )
     parser.add_argument("--discord-data", type=Path, default=defaults["discord_data"], help="Discord data folder")
     parser.add_argument("--bd-asar", type=Path, default=defaults["bd_asar"], help="BetterDiscord asar output path")
     return parser.parse_args()
@@ -242,6 +290,12 @@ def read_config(path: Path) -> dict:
             if not isinstance(value, str):
                 raise ValueError(f"Config value must be a path string: {key}")
             result[key] = Path(value).expanduser()
+        elif key == "release":
+            if not isinstance(value, str):
+                raise ValueError("Config release must be a string.")
+            if value not in {"auto", "all", *DISCORD_RELEASES.keys()}:
+                raise ValueError(f"Config release must be auto, all, stable, ptb, canary, or development: {value}")
+            result[key] = value
         else:
             raise ValueError(f"Unknown config key: {key}")
     return result
@@ -278,6 +332,7 @@ def options_dict(args: argparse.Namespace) -> dict:
         "force_download": args.force_download,
         "keep_open": args.keep_open,
         "notify": args.notify,
+        "release": args.release,
         "reopen": args.reopen,
         "verbose": args.verbose,
         "wait_update": args.wait_update,
@@ -351,8 +406,35 @@ def remove_path(path: Path, dry_run: bool) -> None:
         path.unlink()
 
 
-def unpatch_discord(discord_data: Path, restart: bool, reopen: bool, dry_run: bool) -> None:
-    index_paths = discord_core_index_paths(discord_data)
+def selected_releases(args: argparse.Namespace) -> list[DiscordRelease]:
+    default_data = Path(built_in_defaults()["discord_data"]).expanduser()
+    requested_data = args.discord_data.expanduser()
+    if requested_data != default_data:
+        return [
+            DiscordRelease(
+                key="custom",
+                name="Discord custom",
+                app_name=DISCORD_RELEASES["stable"].app_name,
+                app_path=DISCORD_RELEASES["stable"].app_path,
+                data_path=requested_data,
+                shipit_state=DISCORD_RELEASES["stable"].shipit_state,
+            )
+        ]
+
+    if args.release == "all":
+        return list(DISCORD_RELEASES.values())
+    if args.release != "auto":
+        return [DISCORD_RELEASES[args.release]]
+
+    detected = [release for release in DISCORD_RELEASES.values() if release.app_path.exists() or release.data_path.exists()]
+    if not detected:
+        raise FileNotFoundError("No Discord releases found. Install Discord or pass --discord-data.")
+    return detected
+
+
+def unpatch_discord(release: DiscordRelease, restart: bool, reopen: bool, dry_run: bool) -> None:
+    LOG.info("Release: %s", release.name)
+    index_paths = discord_core_index_paths(release.data_path)
     restored_script = 'module.exports = require("./core.asar");\n'
     patched_paths = []
 
@@ -364,12 +446,12 @@ def unpatch_discord(discord_data: Path, restart: bool, reopen: bool, dry_run: bo
             patched_paths.append(index_js)
 
     if not patched_paths:
-        LOG.info("No BetterDiscord patch found under %s", discord_data)
+        LOG.info("No BetterDiscord patch found under %s", release.data_path)
         return
 
-    was_running = restart and discord_running()
+    was_running = restart and discord_running(release)
     if was_running and restart and not dry_run:
-        quit_discord()
+        quit_discord(release)
 
     try:
         for index_js in patched_paths:
@@ -378,43 +460,51 @@ def unpatch_discord(discord_data: Path, restart: bool, reopen: bool, dry_run: bo
                 index_js.write_text(restored_script, encoding="utf-8")
     finally:
         if was_running and restart and reopen and not dry_run:
-            open_discord()
+            open_discord(release)
 
 
 def install(options: Options) -> None:
     LOG.info("BetterDiscord installer script")
-    LOG.info("Discord data: %s", options.discord_data)
     LOG.info("BetterDiscord asar: %s", options.bd_asar)
     notify("BetterDiscord", "Preparing installation", options.notify)
 
-    update_dir = discord_update_dir()
-    if options.wait_update and not wait_for_update(update_dir):
-        notify("BetterDiscord", "Discord is still updating", options.notify)
-        raise RuntimeError("Discord update did not finish in time")
+    if options.download:
+        download_asar(options.bd_asar, force=options.force_download, dry_run=options.dry_run)
 
-    version_dir = latest_version_dir(options.discord_data)
-    core_dirs = discord_core_dirs(options.discord_data)
+    for release in options.releases:
+        install_release(release, options)
+
+    notify("BetterDiscord", "Installation complete", options.notify)
+
+
+def install_release(release: DiscordRelease, options: Options) -> None:
+    LOG.info("Release: %s", release.name)
+    LOG.info("Discord data: %s", release.data_path)
+
+    update_dir = discord_update_dir(release)
+    if options.wait_update and not wait_for_update(release, update_dir):
+        notify("BetterDiscord", f"{release.name} is still updating", options.notify)
+        raise RuntimeError(f"{release.name} update did not finish in time")
+
+    version_dir = latest_version_dir(release.data_path)
+    core_dirs = discord_core_dirs(release.data_path)
     LOG.info("Latest Discord version: %s", version_dir.name)
     LOG.info("Discord cores found: %d", len(core_dirs))
 
-    was_running = options.restart and discord_running()
+    was_running = options.restart and discord_running(release)
     if was_running and options.restart and not options.dry_run:
-        quit_discord()
+        quit_discord(release)
 
     try:
-        if options.download:
-            download_asar(options.bd_asar, force=options.force_download, dry_run=options.dry_run)
         changed = 0
         for core_dir in core_dirs:
             if patch_core(core_dir, dry_run=options.dry_run):
                 changed += 1
         LOG.info("Discord cores patched: %d", changed)
-        log_discord_app_version()
+        log_discord_app_version(release)
     finally:
         if was_running and options.restart and options.reopen and not options.dry_run:
-            open_discord()
-
-    notify("BetterDiscord", "Installation complete", options.notify)
+            open_discord(release)
 
 
 def latest_version_dir(discord_data: Path) -> Path:
@@ -552,8 +642,8 @@ def download_asar(path: Path, force: bool, dry_run: bool) -> bool:
     return True
 
 
-def discord_update_dir() -> Optional[Path]:
-    state = HOME / "Library/Caches/com.hnc.Discord.ShipIt/ShipItState.plist"
+def discord_update_dir(release: DiscordRelease) -> Optional[Path]:
+    state = release.shipit_state
     try:
         with state.open("rb") as file:
             url = plistlib.load(file).get("updateBundleURL", "")
@@ -564,44 +654,44 @@ def discord_update_dir() -> Optional[Path]:
     return Path(url) if url else None
 
 
-def wait_for_update(update_dir: Optional[Path], timeout: float = 180.0) -> bool:
+def wait_for_update(release: DiscordRelease, update_dir: Optional[Path], timeout: float = 180.0) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if not shipit_running() and (update_dir is None or not update_dir.exists()):
+        if not shipit_running(release) and (update_dir is None or not update_dir.exists()):
             return True
-        LOG.info("Waiting for Discord updater...")
+        LOG.info("Waiting for %s updater...", release.name)
         time.sleep(2)
     return False
 
 
-def discord_running() -> bool:
-    return subprocess.run(["pgrep", "-x", "Discord"], capture_output=True).returncode == 0
+def discord_running(release: DiscordRelease) -> bool:
+    return subprocess.run(["pgrep", "-x", release.app_name], capture_output=True).returncode == 0
 
 
-def shipit_running() -> bool:
+def shipit_running(release: DiscordRelease) -> bool:
     result = subprocess.run(["ps", "aux"], capture_output=True, text=True)
-    return any("ShipIt" in line and "Discord" in line for line in result.stdout.splitlines())
+    return any("ShipIt" in line and release.name in line for line in result.stdout.splitlines())
 
 
-def quit_discord() -> None:
-    LOG.info("Quitting Discord")
-    subprocess.run(["osascript", "-e", 'quit app "Discord"'], check=False)
+def quit_discord(release: DiscordRelease) -> None:
+    LOG.info("Quitting %s", release.name)
+    subprocess.run(["osascript", "-e", f'quit app "{escape_osa(release.app_name)}"'], check=False)
     deadline = time.time() + 10
-    while time.time() < deadline and discord_running():
+    while time.time() < deadline and discord_running(release):
         time.sleep(0.25)
 
 
-def open_discord() -> None:
-    LOG.info("Reopening Discord")
-    subprocess.run(["open", "-a", "Discord"], check=False)
+def open_discord(release: DiscordRelease) -> None:
+    LOG.info("Reopening %s", release.name)
+    subprocess.run(["open", "-a", release.app_name], check=False)
 
 
-def log_discord_app_version() -> None:
+def log_discord_app_version(release: DiscordRelease) -> None:
     try:
-        with (DISCORD_APP / "Contents/Info.plist").open("rb") as file:
-            LOG.info("Discord app version: %s", plistlib.load(file).get("CFBundleShortVersionString", "unknown"))
+        with (release.app_path / "Contents/Info.plist").open("rb") as file:
+            LOG.info("%s app version: %s", release.name, plistlib.load(file).get("CFBundleShortVersionString", "unknown"))
     except Exception as error:
-        LOG.debug("Could not read Discord app version: %s", error)
+        LOG.debug("Could not read %s app version: %s", release.name, error)
 
 
 def notify(title: str, message: str, enabled: bool) -> None:

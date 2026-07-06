@@ -2,6 +2,8 @@
 
 Small macOS script that patches Discord to load BetterDiscord.
 
+Supports Stable, PTB, Canary, and Development release detection.
+
 ## Install
 
 ```sh
@@ -22,6 +24,7 @@ Other useful commands:
 ```sh
 betterdiscord --edit-config
 betterdiscord --dry-run
+betterdiscord --release canary
 betterdiscord --update
 betterdiscord --unpatch
 betterdiscord --uninstall
@@ -42,6 +45,7 @@ Config keys:
 
 | Key | Meaning |
 | --- | --- |
+| `release` | Discord release to patch: `auto`, `all`, `stable`, `ptb`, `canary`, or `development`. |
 | `notify` | Show macOS notifications. |
 | `keep_open` | Patch without quitting Discord first. |
 | `reopen` | Reopen Discord after patching. |
@@ -55,6 +59,6 @@ Config keys:
 
 ## Notes
 
-The script finds Discord's current `discord_desktop_core`, writes the
+The script finds Discord's current `discord_desktop_core` folders, writes the
 BetterDiscord loader to `index.js`, and downloads `betterdiscord.asar` with
 ETag caching.
