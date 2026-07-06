@@ -579,7 +579,7 @@ def install_release(release: DiscordRelease, options: Options) -> None:
         LOG.info("Discord cores patched: %d", changed)
         log_discord_app_version(release)
     finally:
-        if was_running and options.restart and options.reopen and not options.dry_run:
+        if options.restart and options.reopen and not options.dry_run:
             open_discord(release)
 
 
@@ -753,6 +753,9 @@ def quit_discord(release: DiscordRelease) -> None:
 
 def open_discord(release: DiscordRelease) -> None:
     LOG.info("Reopening %s", release.name)
+    if release.app_path.exists():
+        subprocess.run(["open", str(release.app_path)], check=False)
+        return
     subprocess.run(["open", "-a", release.app_name], check=False)
 
 
