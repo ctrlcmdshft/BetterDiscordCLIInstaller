@@ -22,6 +22,11 @@ DISCORD_APP = Path("/Applications/Discord.app")
 BD_ASAR = HOME / "Library/Application Support/BetterDiscord/data/betterdiscord.asar"
 BD_ASAR_URL = "https://github.com/rauenzi/BetterDiscordApp/releases/latest/download/betterdiscord.asar"
 CONFIG_PATH = HOME / ".config/betterdiscord-cli-installer/config.json"
+APP_NAME = "BetterDiscordCLIInstaller"
+INSTALL_DIR = HOME / f"Library/Application Support/{APP_NAME}"
+REPO = "ctrlcmdshft/BetterDiscordCLIInstaller"
+BRANCH = "main"
+RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}"
 CONFIG_TEMPLATE = {
     "notify": False,
     "keep_open": False,
@@ -89,6 +94,10 @@ def main() -> int:
         print(json.dumps(options_dict(args), indent=2, sort_keys=True))
         return 0
 
+    if args.update:
+        update_script(args.update_dir.expanduser(), args.raw_base)
+        return 0
+
     options = Options(
         discord_data=args.discord_data.expanduser(),
         bd_asar=args.bd_asar.expanduser(),
@@ -122,6 +131,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--init-config", action="store_true", help="create a config file with current defaults")
     parser.add_argument("--edit-config", action="store_true", help="open the config file for editing")
     parser.add_argument("--show-config", action="store_true", help="print effective settings and exit")
+    parser.add_argument("--update", action="store_true", help="update this installer script from GitHub")
+    parser.add_argument(
+        "--update-dir",
+        type=Path,
+        default=Path(os.environ.get("BDI_INSTALL_DIR", INSTALL_DIR)),
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--raw-base",
+        default=os.environ.get(
+            "BDI_RAW_BASE",
+            f"https://raw.githubusercontent.com/{os.environ.get('BDI_REPO', REPO)}/{os.environ.get('BDI_BRANCH', BRANCH)}",
+        ),
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--force", action="store_true", help="overwrite an existing config with --init-config")
 
     notify = parser.add_mutually_exclusive_group()
@@ -222,6 +246,30 @@ def options_dict(args: argparse.Namespace) -> dict:
         "verbose": args.verbose,
         "wait_update": args.wait_update,
     }
+
+
+def update_script(install_dir: Path, raw_base: str) -> None:
+    LOG.info("Updating installer script from %s", raw_base)
+    install_dir.mkdir(parents=True, exist_ok=True)
+    for filename in ("betterdiscord.py", "README.md", "install.sh"):
+        download_file(f"{raw_base.rstrip('/')}/{filename}", install_dir / filename)
+    (install_dir / "betterdiscord").write_text(
+        '#!/bin/zsh\nDIR="${0:A:h}"\npython3 "$DIR/betterdiscord.py" "$@"\n',
+        encoding="utf-8",
+    )
+    (install_dir / "betterdiscord").chmod(0o755)
+    (install_dir / "install.sh").chmod(0o755)
+    subprocess.run([sys.executable, "-m", "py_compile", str(install_dir / "betterdiscord.py")], check=True)
+    LOG.info("Updated installer script: %s", install_dir)
+
+
+def download_file(url: str, destination: Path) -> None:
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    LOG.info("Download %s", url)
+    request = urllib.request.Request(url, headers={"User-Agent": "BetterDiscordInstaller/2.0"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        temporary.write_bytes(response.read())
+    temporary.replace(destination)
 
 
 def install(options: Options) -> None:

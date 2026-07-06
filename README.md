@@ -35,6 +35,7 @@ Useful options:
 --init-config      Create the user config file
 --edit-config      Open the user config file for editing
 --show-config      Print the effective settings
+--update           Update the installer script from GitHub
 --no-notify         Disable macOS notifications
 --keep-open         Patch without quitting Discord first
 --no-reopen         Quit Discord for patching but do not reopen it
@@ -87,6 +88,12 @@ betterdiscord --config ~/path/to/config.json --show-config
 ```
 
 The same path can also be supplied with `BD_CONFIG` for scripts that need it.
+
+Update the installer script:
+
+```sh
+betterdiscord --update
+```
 
 The installer finds Discord's current `discord_desktop_core` by locating
 `core.asar`, then writes `index.js` beside it using BetterDiscord's injection
