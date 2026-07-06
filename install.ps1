@@ -16,6 +16,45 @@ function Download-File($Url, $Destination) {
     Move-Item -Force $tmp $Destination
 }
 
+function Get-UserPathEntries() {
+    $current = [Environment]::GetEnvironmentVariable("Path", "User")
+    if ([string]::IsNullOrWhiteSpace($current)) {
+        return @()
+    }
+    return $current.Split(";", [System.StringSplitOptions]::RemoveEmptyEntries)
+}
+
+function Add-UserPathEntry($Entry) {
+    $resolved = [System.IO.Path]::GetFullPath($Entry)
+    $entries = Get-UserPathEntries
+    $alreadyPresent = $entries | Where-Object {
+        [string]::Equals(
+            [System.IO.Path]::GetFullPath($_),
+            $resolved,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+    }
+    if ($alreadyPresent) {
+        return $false
+    }
+
+    $updated = @($entries + $resolved) -join ";"
+    [Environment]::SetEnvironmentVariable("Path", $updated, "User")
+    if ([string]::IsNullOrWhiteSpace($env:Path)) {
+        $env:Path = $resolved
+    }
+    elseif (-not (($env:Path -split ";") | Where-Object {
+        [string]::Equals(
+            [System.IO.Path]::GetFullPath($_),
+            $resolved,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+    })) {
+        $env:Path = "$env:Path;$resolved"
+    }
+    return $true
+}
+
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
@@ -40,6 +79,14 @@ if ($env:BDI_EDIT_CONFIG -eq "1") {
     python (Join-Path $InstallDir "betterdiscord.py") --config $ConfigPath --edit-config
 }
 
+$PathAdded = Add-UserPathEntry $BinDir
+
 Write-Host "Installed: $InstallDir"
 Write-Host "Config: $ConfigPath"
 Write-Host "Command: $BinPath"
+if ($PathAdded) {
+    Write-Host "Added to user PATH: $BinDir"
+}
+else {
+    Write-Host "Already on user PATH: $BinDir"
+}

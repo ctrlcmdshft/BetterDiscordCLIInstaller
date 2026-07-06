@@ -24,10 +24,17 @@ Windows preview:
 irm https://raw.githubusercontent.com/ctrlcmdshft/BetterDiscordPatcher/windows/install.ps1 | iex
 ```
 
+The Windows installer places the script under `%LOCALAPPDATA%\BetterDiscordPatcher`,
+creates `betterdiscord.cmd`, and adds that directory to the user `PATH`.
+
 ## Commands
 
 ```sh
 betterdiscord
+betterdiscord --version
+betterdiscord --ptb
+betterdiscord --canary
+betterdiscord --all
 betterdiscord --dry-run
 betterdiscord --edit-config
 betterdiscord --format-config
@@ -71,6 +78,25 @@ Generated config:
 The example above shows macOS paths. Windows uses `%LOCALAPPDATA%` for Discord
 data and `%APPDATA%` for BetterDiscord/config paths.
 
+Release flags choose which Discord install to target without changing the saved
+config path:
+
+```sh
+betterdiscord --stable
+betterdiscord --ptb
+betterdiscord --canary
+betterdiscord --all
+betterdiscord --auto
+```
+
+Check the installed script version with:
+
+```sh
+betterdiscord --version
+```
+
+Use `betterdiscord --update` to refresh the installed script from GitHub.
+
 | Key | Meaning |
 | --- | --- |
 | `discord_data` | Discord data folder to patch. |
@@ -100,4 +126,5 @@ betterdiscord --uninstall
 ```
 
 `--unpatch` removes the BetterDiscord loader from Discord. `--uninstall` removes
-the script command and asks before removing config.
+the script command, removes its Windows `PATH` entry, and keeps config unless
+you confirm removal or pass `--remove-config`.

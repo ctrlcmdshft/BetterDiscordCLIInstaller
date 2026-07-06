@@ -8,6 +8,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -20,10 +21,22 @@ LOG = logging.getLogger("betterdiscord")
 HOME = Path.home()
 BD_ASAR_URL = "https://github.com/rauenzi/BetterDiscordApp/releases/latest/download/betterdiscord.asar"
 APP_NAME = "BetterDiscordPatcher"
+SCRIPT_VERSION = "2.1.0"
 REPO = "ctrlcmdshft/BetterDiscordPatcher"
 BRANCH = "windows"
 RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}"
 SUPPORTED_SYSTEMS = {"Darwin", "Windows"}
+WINDOWS_RELEASE_DIRS = {
+    "stable": "Discord",
+    "ptb": "DiscordPTB",
+    "canary": "DiscordCanary",
+}
+MAC_RELEASE_DIRS = {
+    "stable": "discord",
+    "ptb": "discordptb",
+    "canary": "discordcanary",
+}
+RELEASE_ORDER = ("stable", "ptb", "canary")
 
 
 def env_path(name: str, fallback: Path) -> Path:
@@ -31,11 +44,11 @@ def env_path(name: str, fallback: Path) -> Path:
     return Path(value) if value else fallback
 
 
-def default_discord_data() -> Path:
+def default_discord_data(release: str = "stable") -> Path:
     system = platform.system()
     if system == "Windows":
-        return env_path("LOCALAPPDATA", HOME / "AppData/Local") / "Discord"
-    return HOME / "Library/Application Support/discord"
+        return env_path("LOCALAPPDATA", HOME / "AppData/Local") / WINDOWS_RELEASE_DIRS[release]
+    return HOME / "Library/Application Support" / MAC_RELEASE_DIRS[release]
 
 
 def default_bd_asar() -> Path:
@@ -107,6 +120,7 @@ module.exports = require("./core.asar");
 
 @dataclass
 class Options:
+    release: str
     discord_data: Path
     bd_asar: Path
     notify: bool
@@ -122,6 +136,8 @@ class Options:
 
 def main() -> int:
     args = parse_args()
+    args.target_discord_data = resolve_target_discord_data(args)
+    args.discord_data = args.target_discord_data[0]
     logging.basicConfig(
         format="%(asctime)s %(levelname)s: %(message)s" if args.verbose else "%(message)s",
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -153,12 +169,13 @@ def main() -> int:
 
     if args.unpatch:
         try:
-            unpatch_discord(
-                args.discord_data.expanduser(),
-                restart=not args.keep_open,
-                reopen=args.reopen,
-                dry_run=args.dry_run,
-            )
+            for discord_data in args.target_discord_data:
+                unpatch_discord(
+                    discord_data,
+                    restart=not args.keep_open,
+                    reopen=args.reopen,
+                    dry_run=args.dry_run,
+                )
         except Exception as error:
             LOG.error("Unpatch failed: %s", error)
             return 1
@@ -166,7 +183,8 @@ def main() -> int:
 
     if args.cleanup_old:
         try:
-            cleanup_old_versions(args.discord_data.expanduser(), keep=args.keep_versions, dry_run=args.dry_run)
+            for discord_data in args.target_discord_data:
+                cleanup_old_versions(discord_data, keep=args.keep_versions, dry_run=args.dry_run)
         except Exception as error:
             LOG.error("Cleanup failed: %s", error)
             return 1
@@ -182,22 +200,23 @@ def main() -> int:
         )
         return 0
 
-    options = Options(
-        discord_data=args.discord_data.expanduser(),
-        bd_asar=args.bd_asar.expanduser(),
-        notify=args.notify,
-        restart=not args.keep_open,
-        reopen=args.reopen,
-        download=args.download,
-        force_download=args.force_download,
-        wait_update=args.wait_update,
-        cleanup_before_install=args.cleanup_before_install,
-        keep_versions=args.keep_versions,
-        dry_run=args.dry_run,
-    )
-
     try:
-        install(options)
+        for discord_data in args.target_discord_data:
+            options = Options(
+                release=release_name_for_discord_data(discord_data),
+                discord_data=discord_data,
+                bd_asar=args.bd_asar.expanduser(),
+                notify=args.notify,
+                restart=not args.keep_open,
+                reopen=args.reopen,
+                download=args.download,
+                force_download=args.force_download,
+                wait_update=args.wait_update,
+                cleanup_before_install=args.cleanup_before_install,
+                keep_versions=args.keep_versions,
+                dry_run=args.dry_run,
+            )
+            install(options)
         return 0
     except Exception as error:
         LOG.error("Install failed: %s", error)
@@ -244,6 +263,14 @@ def parse_args() -> argparse.Namespace:
         help=argparse.SUPPRESS,
     )
     parser.add_argument("--force", action="store_true", help="overwrite an existing config with --init-config")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {SCRIPT_VERSION}")
+
+    release = parser.add_mutually_exclusive_group()
+    release.add_argument("--stable", dest="release", action="store_const", const="stable", help="target Discord stable")
+    release.add_argument("--ptb", dest="release", action="store_const", const="ptb", help="target Discord PTB")
+    release.add_argument("--canary", dest="release", action="store_const", const="canary", help="target Discord Canary")
+    release.add_argument("--all", dest="release", action="store_const", const="all", help="target every installed Discord release")
+    release.add_argument("--auto", dest="release", action="store_const", const="auto", help="target the first installed Discord release")
 
     notify = parser.add_mutually_exclusive_group()
     notify.add_argument("--notify", dest="notify", action="store_true", help="enable macOS notifications")
@@ -275,7 +302,40 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--keep-versions", type=int, default=defaults["keep_versions"], help="number of Discord app versions to keep when cleaning old versions")
     parser.add_argument("--discord-data", type=Path, default=defaults["discord_data"], help="Discord data folder")
     parser.add_argument("--bd-asar", type=Path, default=defaults["bd_asar"], help="BetterDiscord asar output path")
-    return parser.parse_args()
+    parser.set_defaults(release="stable")
+    args = parser.parse_args()
+    args.release_explicit = any(
+        arg in {"--stable", "--ptb", "--canary", "--all", "--auto"}
+        for arg in sys.argv[1:]
+    )
+    args.discord_data_explicit = any(
+        arg == "--discord-data" or arg.startswith("--discord-data=")
+        for arg in sys.argv[1:]
+    )
+    return args
+
+
+def resolve_target_discord_data(args: argparse.Namespace) -> list[Path]:
+    if args.discord_data_explicit:
+        return [args.discord_data.expanduser()]
+    if not args.release_explicit and args.discord_data != built_in_defaults()["discord_data"]:
+        return [args.discord_data.expanduser()]
+
+    release = args.release
+    if release == "all":
+        targets = [default_discord_data(name) for name in RELEASE_ORDER if default_discord_data(name).exists()]
+        if targets:
+            return targets
+        checked = ", ".join(str(default_discord_data(name)) for name in RELEASE_ORDER)
+        raise FileNotFoundError(f"No installed Discord releases found. Checked: {checked}")
+    if release == "auto":
+        for name in RELEASE_ORDER:
+            candidate = default_discord_data(name)
+            if candidate.exists():
+                args.release = name
+                return [candidate]
+        return [default_discord_data("stable")]
+    return [default_discord_data(release)]
 
 
 def built_in_defaults() -> dict:
@@ -418,10 +478,31 @@ def uninstall_script(
     remove_config: bool,
     dry_run: bool,
 ) -> None:
-    remove_path(bin_path, dry_run)
-    remove_path(install_dir, dry_run)
     if not remove_config and config_path.exists():
         remove_config = confirm("Remove config too?", default=False)
+
+    if platform.system() == "Windows":
+        if dry_run:
+            remove_path(bin_path, dry_run)
+            remove_path(install_dir, dry_run)
+            remove_windows_user_path_entry(bin_path.parent, dry_run)
+            if remove_config:
+                remove_path(config_path, dry_run)
+            else:
+                LOG.info("Keeping config: %s", config_path)
+            return
+
+        schedule_windows_uninstall(
+            install_dir,
+            bin_path,
+            config_path,
+            remove_config=remove_config,
+        )
+        LOG.info("Scheduled Windows uninstall cleanup.")
+        return
+
+    remove_path(bin_path, dry_run)
+    remove_path(install_dir, dry_run)
     if remove_config:
         remove_path(config_path, dry_run)
         config_parent = config_path.parent
@@ -435,7 +516,10 @@ def confirm(prompt: str, default: bool = False) -> bool:
     if not sys.stdin.isatty():
         return default
     suffix = "[Y/n]" if default else "[y/N]"
-    answer = input(f"{prompt} {suffix} ").strip().lower()
+    try:
+        answer = input(f"{prompt} {suffix} ").strip().lower()
+    except EOFError:
+        return default
     if not answer:
         return default
     return answer in {"y", "yes"}
@@ -452,6 +536,147 @@ def remove_path(path: Path, dry_run: bool) -> None:
         shutil.rmtree(path)
     else:
         path.unlink()
+
+
+def remove_windows_user_path_entry(path: Path, dry_run: bool) -> None:
+    target = str(path.expanduser().resolve())
+    current = os.environ.get("PATH", "")
+    try:
+        stored = os.environ.get("PATH", "")
+        user_path = stored
+        if platform.system() == "Windows":
+            result = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    '[Environment]::GetEnvironmentVariable("Path", "User")',
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                user_path = result.stdout.strip()
+    except Exception as error:
+        LOG.debug("Could not read Windows user PATH: %s", error)
+        user_path = current
+
+    entries = [entry for entry in user_path.split(";") if entry.strip()]
+    kept = []
+    removed = False
+    for entry in entries:
+        try:
+            normalized = str(Path(entry).expanduser().resolve())
+        except Exception:
+            normalized = os.path.normcase(os.path.normpath(entry))
+        if os.path.normcase(normalized) == os.path.normcase(target):
+            removed = True
+            continue
+        kept.append(entry)
+
+    if not removed:
+        LOG.info("PATH entry not found: %s", path)
+        return
+
+    LOG.info("%sRemove from user PATH: %s", "[dry-run] " if dry_run else "", path)
+    if dry_run:
+        return
+    subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            'param([string]$value) [Environment]::SetEnvironmentVariable("Path", $value, "User")',
+            ";".join(kept),
+        ],
+        check=False,
+    )
+
+
+def schedule_windows_uninstall(
+    install_dir: Path,
+    bin_path: Path,
+    config_path: Path,
+    remove_config: bool,
+) -> None:
+    helper_path = Path(tempfile.gettempdir()) / f"betterdiscord-uninstall-{os.getpid()}.ps1"
+    helper_path.write_text(
+        """\
+param(
+    [int]$ParentPid,
+    [string]$InstallDir,
+    [string]$BinPath,
+    [string]$ConfigPath,
+    [string]$PathEntry,
+    [int]$RemoveConfig
+)
+
+while (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {
+    Start-Sleep -Milliseconds 250
+}
+
+function Remove-PathIfExists {
+    param([string]$Target)
+    if (Test-Path -LiteralPath $Target) {
+        Remove-Item -LiteralPath $Target -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+$entries = @()
+$currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if (-not [string]::IsNullOrWhiteSpace($currentPath)) {
+    $entries = $currentPath.Split(";", [System.StringSplitOptions]::RemoveEmptyEntries) |
+        Where-Object {
+            -not [string]::Equals(
+                [System.IO.Path]::GetFullPath($_),
+                [System.IO.Path]::GetFullPath($PathEntry),
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
+        }
+}
+[Environment]::SetEnvironmentVariable("Path", ($entries -join ";"), "User")
+
+Remove-PathIfExists $BinPath
+Remove-PathIfExists $InstallDir
+
+if ($RemoveConfig -ne 0) {
+    Remove-PathIfExists $ConfigPath
+    $configParent = Split-Path -Parent $ConfigPath
+    if ((Test-Path -LiteralPath $configParent) -and -not (Get-ChildItem -LiteralPath $configParent -Force -ErrorAction SilentlyContinue)) {
+        Remove-Item -LiteralPath $configParent -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+""",
+        encoding="utf-8",
+    )
+    subprocess.Popen(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+            str(helper_path),
+            "-ParentPid",
+            str(os.getpid()),
+            "-InstallDir",
+            str(install_dir),
+            "-BinPath",
+            str(bin_path),
+            "-ConfigPath",
+            str(config_path),
+            "-PathEntry",
+            str(bin_path.parent),
+            "-RemoveConfig",
+            "1" if remove_config else "0",
+        ],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
 
 
 def cleanup_old_versions(discord_data: Path, keep: int, dry_run: bool) -> list[Path]:
@@ -492,9 +717,9 @@ def unpatch_discord(discord_data: Path, restart: bool, reopen: bool, dry_run: bo
         LOG.info("No BetterDiscord patch found under %s", discord_data)
         return
 
-    was_running = restart and discord_running()
+    was_running = restart and discord_running(discord_data)
     if was_running and restart and not dry_run:
-        quit_discord()
+        quit_discord(discord_data)
 
     try:
         for index_js in patched_paths:
@@ -503,11 +728,12 @@ def unpatch_discord(discord_data: Path, restart: bool, reopen: bool, dry_run: bo
                 index_js.write_text(restored_script, encoding="utf-8")
     finally:
         if was_running and restart and reopen and not dry_run:
-            open_discord()
+            open_discord(discord_data)
 
 
 def install(options: Options) -> None:
-    LOG.info("BetterDiscord installer script")
+    LOG.info("BetterDiscord installer script v%s", SCRIPT_VERSION)
+    LOG.info("Release: %s", options.release)
     LOG.info("Discord data: %s", options.discord_data)
     LOG.info("BetterDiscord asar: %s", options.bd_asar)
     notify("BetterDiscord", "Preparing installation", options.notify)
@@ -530,9 +756,9 @@ def install(options: Options) -> None:
     LOG.info("Latest Discord version: %s", version_dir.name)
     LOG.info("Discord cores found: %d", len(core_dirs))
 
-    was_running = discord_running()
+    was_running = discord_running(options.discord_data)
     if was_running and options.restart and not options.dry_run:
-        quit_discord()
+        quit_discord(options.discord_data)
 
     try:
         if options.download:
@@ -545,13 +771,37 @@ def install(options: Options) -> None:
         log_discord_app_version()
     finally:
         if was_running and options.restart and options.reopen and not options.dry_run:
-            open_discord()
+            open_discord(options.discord_data)
 
     notify("BetterDiscord", "Installation complete", options.notify)
 
 
 def latest_version_dir(discord_data: Path, version_dirs: Optional[list[Path]] = None) -> Path:
     return (version_dirs or discord_version_dirs(discord_data))[-1]
+
+
+def release_name_for_discord_data(discord_data: Path) -> str:
+    if platform.system() == "Windows":
+        name = discord_data.name.lower()
+        for release, dirname in WINDOWS_RELEASE_DIRS.items():
+            if dirname.lower() == name:
+                return release
+        return "custom"
+
+    name = discord_data.name.lower()
+    for release, dirname in MAC_RELEASE_DIRS.items():
+        if dirname.lower() == name:
+            return release
+    return "custom"
+
+
+def windows_process_name(discord_data: Path) -> str:
+    release = release_name_for_discord_data(discord_data)
+    if release == "ptb":
+        return "DiscordPTB.exe"
+    if release == "canary":
+        return "DiscordCanary.exe"
+    return "Discord.exe"
 
 
 def discord_version_dirs(discord_data: Path) -> list[Path]:
@@ -700,15 +950,16 @@ def wait_for_update(update_dir: Optional[Path], timeout: float = 180.0) -> bool:
     return False
 
 
-def discord_running() -> bool:
+def discord_running(discord_data: Optional[Path] = None) -> bool:
     if platform.system() == "Windows":
+        process_name = windows_process_name(discord_data or DISCORD_DATA)
         result = subprocess.run(
-            ["tasklist", "/FI", "IMAGENAME eq Discord.exe"],
+            ["tasklist", "/FI", f"IMAGENAME eq {process_name}"],
             capture_output=True,
             text=True,
             check=False,
         )
-        return "Discord.exe" in result.stdout
+        return process_name in result.stdout
     return subprocess.run(["pgrep", "-x", "Discord"], capture_output=True).returncode == 0
 
 
@@ -719,10 +970,15 @@ def shipit_running() -> bool:
     return any("ShipIt" in line and "Discord" in line for line in result.stdout.splitlines())
 
 
-def quit_discord() -> None:
+def quit_discord(discord_data: Optional[Path] = None) -> None:
     LOG.info("Quitting Discord")
     if platform.system() == "Windows":
-        subprocess.run(["taskkill", "/IM", "Discord.exe", "/T"], check=False, capture_output=True)
+        target = discord_data or DISCORD_DATA
+        process_name = windows_process_name(target)
+        subprocess.run(["taskkill", "/IM", process_name, "/T", "/F"], check=False, capture_output=True)
+        deadline = time.time() + 15
+        while time.time() < deadline and discord_running(target):
+            time.sleep(0.25)
         return
     subprocess.run(["osascript", "-e", 'quit app "Discord"'], check=False)
     deadline = time.time() + 10
@@ -730,10 +986,31 @@ def quit_discord() -> None:
         time.sleep(0.25)
 
 
-def open_discord() -> None:
+def open_discord(discord_data: Optional[Path] = None) -> None:
     LOG.info("Reopening Discord")
     if platform.system() == "Windows":
-        subprocess.run(["cmd", "/c", "start", "", "discord://-/"], check=False)
+        target = discord_data or DISCORD_DATA
+        process_name = windows_process_name(target)
+        update_exe = target / "Update.exe"
+        if update_exe.exists():
+            subprocess.run(
+                [str(update_exe), "--processStart", process_name],
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return
+
+        version_dir = latest_version_dir(target)
+        discord_exe = version_dir / process_name
+        if discord_exe.exists():
+            subprocess.run(
+                [str(discord_exe)],
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return
+
+        LOG.warning("Could not find a Windows Discord executable to reopen.")
         return
     subprocess.run(["open", "-a", "Discord"], check=False)
 
