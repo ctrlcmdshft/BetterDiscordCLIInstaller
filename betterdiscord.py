@@ -22,7 +22,7 @@ LOG = logging.getLogger("betterdiscord")
 HOME = Path.home()
 BD_ASAR_URL = "https://github.com/rauenzi/BetterDiscordApp/releases/latest/download/betterdiscord.asar"
 APP_NAME = "BetterDiscordPatcher"
-SCRIPT_VERSION = "2.1.3"
+SCRIPT_VERSION = "2.1.4"
 REPO = "ctrlcmdshft/BetterDiscordPatcher"
 BRANCH = "main"
 RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}"
@@ -524,6 +524,9 @@ def read_config(path: Path) -> dict:
         elif key == "release":
             if not isinstance(value, str):
                 raise ValueError("Config release must be a string.")
+            if value not in {"auto", "all", *RELEASE_ORDER}:
+                raise ValueError(f"Config release must be auto, all, stable, ptb, or canary: {value}")
+            result[key] = value
         else:
             raise ValueError(f"Unknown config key: {key}")
     return result
@@ -567,6 +570,7 @@ def edit_config(path: Path) -> None:
 
 def options_dict(args: argparse.Namespace) -> dict:
     return {
+        "release": args.release,
         "discord_data": str(args.discord_data),
         "bd_asar": str(args.bd_asar),
         "download": args.download,
@@ -874,6 +878,12 @@ def install(options: Options) -> None:
     LOG.info("Discord data: %s", options.discord_data)
     LOG.info("BetterDiscord asar: %s", options.bd_asar)
     notify("BetterDiscord", "Preparing installation", options.notify)
+
+    update_dir = discord_update_dir(options.discord_data)
+    if options.wait_update and not wait_for_update(options.discord_data, update_dir):
+        notify("BetterDiscord", "Discord is still updating", options.notify)
+        raise RuntimeError("Discord update did not finish in time")
+
     was_running = discord_running(options.discord_data)
     if was_running and options.restart and not options.dry_run:
         quit_discord(options.discord_data)
@@ -906,7 +916,7 @@ def install(options: Options) -> None:
             if patch_core(core_dir, dry_run=options.dry_run):
                 changed += 1
         LOG.info("Discord cores patched: %d", changed)
-        log_discord_app_version()
+        log_discord_app_version(options.discord_data)
     finally:
         if was_running and options.restart and options.reopen and not options.dry_run:
             open_discord(options.discord_data)
@@ -1064,10 +1074,15 @@ def download_asar(path: Path, force: bool, dry_run: bool) -> bool:
     return True
 
 
-def discord_update_dir() -> Optional[Path]:
+def discord_release_for_data(discord_data: Optional[Path] = None) -> DiscordRelease:
+    release = release_name_for_discord_data(discord_data or DISCORD_DATA)
+    return DISCORD_RELEASES.get(release, DISCORD_RELEASES["stable"])
+
+
+def discord_update_dir(discord_data: Optional[Path] = None) -> Optional[Path]:
     if platform.system() == "Windows":
         return None
-    state = HOME / "Library/Caches/com.hnc.Discord.ShipIt/ShipItState.plist"
+    state = discord_release_for_data(discord_data).shipit_state
     try:
         with state.open("rb") as file:
             url = plistlib.load(file).get("updateBundleURL", "")
@@ -1078,10 +1093,11 @@ def discord_update_dir() -> Optional[Path]:
     return Path(url) if url else None
 
 
-def wait_for_update(release: DiscordRelease, update_dir: Optional[Path], timeout: float = 180.0) -> bool:
+def wait_for_update(discord_data: Optional[Path], update_dir: Optional[Path], timeout: float = 180.0) -> bool:
+    release = discord_release_for_data(discord_data)
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if not shipit_running(release) and (update_dir is None or not update_dir.exists()):
+        if not shipit_running(discord_data) and (update_dir is None or not update_dir.exists()):
             return True
         LOG.info("Waiting for %s updater...", release.name)
         time.sleep(2)
@@ -1101,9 +1117,10 @@ def discord_running(discord_data: Optional[Path] = None) -> bool:
     return subprocess.run(["pgrep", "-x", "Discord"], capture_output=True).returncode == 0
 
 
-def shipit_running() -> bool:
+def shipit_running(discord_data: Optional[Path] = None) -> bool:
     if platform.system() == "Windows":
         return False
+    release = discord_release_for_data(discord_data)
     result = subprocess.run(["ps", "aux"], capture_output=True, text=True)
     return any("ShipIt" in line and release.name in line for line in result.stdout.splitlines())
 
@@ -1120,7 +1137,7 @@ def quit_discord(discord_data: Optional[Path] = None) -> None:
         return
     subprocess.run(["osascript", "-e", 'quit app "Discord"'], check=False)
     deadline = time.time() + 10
-    while time.time() < deadline and discord_running(release):
+    while time.time() < deadline and discord_running(discord_data):
         time.sleep(0.25)
 
 
@@ -1150,19 +1167,23 @@ def open_discord(discord_data: Optional[Path] = None) -> None:
 
         LOG.warning("Could not find a Windows Discord executable to reopen.")
         return
-    subprocess.run(["open", "-a", "Discord"], check=False)
+    release = discord_release_for_data(discord_data)
+    if release.app_path.exists():
+        subprocess.run(["open", str(release.app_path)], check=False)
+        return
+    subprocess.run(["open", "-a", release.app_name], check=False)
 
 
-def log_discord_app_version() -> None:
+def log_discord_app_version(discord_data: Optional[Path] = None) -> None:
     if platform.system() == "Windows":
         return
+    release = discord_release_for_data(discord_data)
     try:
         with (release.app_path / "Contents/Info.plist").open("rb") as file:
             version = plistlib.load(file).get("CFBundleShortVersionString")
-            return str(version) if version else None
+            LOG.info("%s app version: %s", release.name, version or "unknown")
     except Exception as error:
         LOG.debug("Could not read %s app version: %s", release.name, error)
-        return None
 
 
 def notify(title: str, message: str, enabled: bool) -> None:
